@@ -357,7 +357,7 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchDate, setSearchDate] = useState(''); // 新增：日期篩選
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
-  const [sortOption, setSortOption] = useState('name');
+  const [sortOption, setSortOption] = useState('created_desc'); // 🟢 修改：預設為最新排序
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -689,6 +689,10 @@ export default function App() {
 
     let imageUrl = equipImagePreview || '';
 
+    // 🟢 取得當前時間作為最後更新時間
+    const now = new Date();
+    const formattedTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
     try {
       const cat = categories.find(c => c.id === equipForm.categoryId);
       const payload = {
@@ -698,6 +702,7 @@ export default function App() {
         categoryName: cat ? cat.name : '未分類',
         note: equipForm.note,
         addDate: equipForm.addDate || '', // 加入日期
+        lastUpdatedStr: formattedTime, // 🟢 新增最後更新時間字串
         imageUrl: imageUrl, 
         sessionId: currentSession.id,
         ...(editItem ? {} : { borrowedCount: 0 }), 
@@ -1116,15 +1121,20 @@ export default function App() {
                           <div className="flex justify-between items-start mb-2">
                             <div>
                               <h3 className="font-bold text-lg text-slate-800 truncate">{item.name}</h3>
-                              <span className="inline-block bg-slate-100 text-slate-500 text-xs px-2 py-1 rounded mt-1">{item.categoryName}</span>
-                              {item.addDate && <span className="inline-block bg-teal-50 text-teal-600 text-xs px-2 py-1 rounded mt-1 ml-1">{item.addDate}</span>}
+                              {/* 🟢 修改：讓分類與加入日期在同一行顯示 */}
+                              <div className="flex flex-wrap items-center gap-2 mt-1">
+                                <span className="inline-block bg-slate-100 text-slate-500 text-xs px-2 py-1 rounded">{item.categoryName}</span>
+                                {item.addDate && <span className="inline-block bg-teal-50 text-teal-600 text-xs px-2 py-1 rounded">{item.addDate}</span>}
+                              </div>
+                              {/* 🟢 新增：顯示最後更新時間 */}
+                              {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
                             </div>
-                            <div className="flex gap-1">
+                            <div className="flex gap-1 flex-shrink-0">
                               <button onClick={()=>openEquipModal(item)} className="p-2 text-slate-400 hover:text-teal-600"><Edit2 className="w-4 h-4"/></button>
                               <button onClick={()=>deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'equipment', item.id))} className="p-2 text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4"/></button>
                             </div>
                           </div>
-                          <div className="flex justify-between text-sm text-slate-600 mb-2">
+                          <div className="flex justify-between text-sm text-slate-600 mb-2 mt-2 pt-2 border-t border-slate-50">
                             <span>總: {item.quantity}</span>
                             <span className="text-orange-600">借: {borrowed}</span>
                             <span className={`font-bold ${available===0?'text-red-600':'text-green-600'}`}>剩: {available}</span>
@@ -1176,7 +1186,11 @@ export default function App() {
                           <td className="p-4 font-medium">
                               {item.name} 
                               <span className="text-xs text-slate-400 block">{item.note}</span>
-                              {item.addDate && <span className="text-xs text-teal-600 block mt-1">加入日期: {item.addDate}</span>}
+                              {/* 🟢 桌面版也加上最後更新時間 */}
+                              <div className="flex flex-col gap-0.5 mt-1">
+                                {item.addDate && <span className="text-xs text-teal-600">加入日期: {item.addDate}</span>}
+                                {item.lastUpdatedStr && <span className="text-[10px] text-slate-400 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</span>}
+                              </div>
                           </td>
                           <td className="p-4">
                             <div className="flex items-center gap-3">
