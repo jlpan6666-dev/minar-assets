@@ -92,8 +92,8 @@ const compressImage = (file) => {
 const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel, isDangerous }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
         <div className="p-6 text-center">
           <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isDangerous ? 'bg-red-100 text-red-600' : 'bg-teal-100 text-teal-600'}`}>
             {isDangerous ? <AlertTriangle className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
@@ -121,8 +121,8 @@ const ReturnModal = ({ isOpen, loan, onConfirm, onCancel }) => {
   if (!isOpen || !loan) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
         <div className="p-6">
           <div className="mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-green-100 text-green-600">
             <CheckSquare className="w-6 h-6" />
@@ -257,7 +257,7 @@ const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick }) =>
   </div>
 );
 
-// --- 頁面：專屬密碼登入 (已替換原本的 AuthScreen) ---
+// --- 頁面：專屬密碼登入 ---
 const AuthScreen = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -355,6 +355,7 @@ export default function App() {
 
   // UI State
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchDate, setSearchDate] = useState(''); // 新增：日期篩選
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
   const [sortOption, setSortOption] = useState('name');
   
@@ -375,7 +376,7 @@ export default function App() {
   
   // Forms State
   const [sessionForm, setSessionForm] = useState({ name: '', date: '', copyFromPrevious: false });
-  const [equipForm, setEquipForm] = useState({ name: '', quantity: 1, categoryId: '', note: '', imageUrl: '' });
+  const [equipForm, setEquipForm] = useState({ name: '', quantity: 1, categoryId: '', note: '', imageUrl: '', addDate: '' });
   
   const [equipImagePreview, setEquipImagePreview] = useState(''); 
   const [isCompressing, setIsCompressing] = useState(false);
@@ -396,7 +397,7 @@ export default function App() {
   useEffect(() => {
     setCurrentPage(1);
     setCurrentLoanPage(1);
-  }, [searchTerm, selectedCategoryFilter, sortOption, viewMode, currentSession]);
+  }, [searchTerm, searchDate, selectedCategoryFilter, sortOption, viewMode, currentSession]);
 
   // Global Listeners
   useEffect(() => {
@@ -419,10 +420,10 @@ export default function App() {
 
     const qEquip = query(collection(db, 'artifacts', appId, 'public', 'data', 'equipment'), where('sessionId', '==', targetSessionId));
     const unsubEquip = onSnapshot(qEquip, (snap) => {
-      let equipCount = 0, borrowedCount = 0, lowStock = 0;
+      let equipCount = snap.size; // 修改為計算設備種類數(Document數量)
+      let borrowedCount = 0, lowStock = 0;
       snap.forEach(doc => {
         const data = doc.data();
-        equipCount += (data.quantity || 0);
         borrowedCount += (data.borrowedCount || 0);
         if ((data.quantity - (data.borrowedCount || 0)) < 3) lowStock++;
       });
@@ -600,11 +601,12 @@ export default function App() {
     }
     if (!itemsToExport.length) { showToast("此版次無資料可匯出", "error"); return; }
     
-    const headers = ["設備名稱", "分類", "總數量", "已借出", "剩餘庫存", "備註"];
+    const headers = ["設備名稱", "分類", "總數量", "已借出", "剩餘庫存", "加入日期", "備註"];
     const rows = itemsToExport.map(item => {
       const borrowed = item.borrowedCount || 0;
       const remaining = item.quantity - borrowed;
-      return [`"${item.name.replace(/"/g, '""')}"`, `"${item.categoryName}"`, item.quantity, borrowed, remaining, `"${(item.note || "").replace(/"/g, '""')}"`].join(",");
+      const addedDate = item.addDate || "";
+      return [`"${item.name.replace(/"/g, '""')}"`, `"${item.categoryName}"`, item.quantity, borrowed, remaining, `"${addedDate}"`, `"${(item.note || "").replace(/"/g, '""')}"`].join(",");
     });
 
     const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
@@ -695,6 +697,7 @@ export default function App() {
         categoryId: equipForm.categoryId,
         categoryName: cat ? cat.name : '未分類',
         note: equipForm.note,
+        addDate: equipForm.addDate || '', // 加入日期
         imageUrl: imageUrl, 
         sessionId: currentSession.id,
         ...(editItem ? {} : { borrowedCount: 0 }), 
@@ -781,7 +784,8 @@ export default function App() {
     const result = equipment.filter(item => {
       const matchSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
       const matchCat = selectedCategoryFilter === 'all' || item.categoryId === selectedCategoryFilter;
-      return matchSearch && matchCat;
+      const matchDate = searchDate ? item.addDate === searchDate : true; // 新增：比對加入日期
+      return matchSearch && matchCat && matchDate;
     });
     result.sort((a, b) => {
       switch (sortOption) {
@@ -796,7 +800,7 @@ export default function App() {
       }
     });
     return result;
-  }, [equipment, searchTerm, selectedCategoryFilter, sortOption]);
+  }, [equipment, searchTerm, searchDate, selectedCategoryFilter, sortOption]);
 
   const totalPages = Math.ceil(filteredEquipment.length / ITEMS_PER_PAGE);
   const paginatedEquipment = useMemo(() => {
@@ -823,7 +827,26 @@ export default function App() {
   const openEquipModal = (item=null) => { 
       setModalType('equipment'); 
       setEditItem(item); 
-      setEquipForm(item ? {name: item.name, quantity: item.quantity, categoryId: item.categoryId, note: item.note, imageUrl: item.imageUrl} : {name: '', quantity: 1, categoryId: categories[0]?.id || '', note: '', imageUrl: ''}); 
+      
+      // 確保取得使用者當地的 YYYY-MM-DD
+      const today = new Date();
+      const localDateStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+      setEquipForm(item ? {
+        name: item.name, 
+        quantity: item.quantity, 
+        categoryId: item.categoryId, 
+        note: item.note, 
+        imageUrl: item.imageUrl,
+        addDate: item.addDate || ''
+      } : {
+        name: '', 
+        quantity: 1, 
+        categoryId: categories[0]?.id || '', 
+        note: '', 
+        imageUrl: '',
+        addDate: localDateStr // 預設為當地今天
+      }); 
       setEquipImagePreview(item?.imageUrl || '');
       setIsModalOpen(true); 
   };
@@ -923,7 +946,7 @@ export default function App() {
              <div className="space-y-6 max-w-7xl mx-auto">
                 <div className="flex items-center gap-2 mb-4"><div className="bg-teal-100 text-teal-700 p-2 rounded-lg"><Sparkles className="w-5 h-5"/></div><span className="text-sm font-bold text-slate-500">目前鎖定：<span className="text-teal-700 text-base">{dashboardStats.latestSessionName}</span></span></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <StatCard title="最新版次設備總數" value={dashboardStats.totalEquipment} icon={Box} colorClass="bg-teal-500" onClick={() => handleStatClick('equipment')} />
+                    <StatCard title="最新版次設備種類數" value={dashboardStats.totalEquipment} icon={Box} colorClass="bg-teal-500" onClick={() => handleStatClick('equipment')} />
                     <StatCard title="目前外借中" value={dashboardStats.totalBorrowed} icon={Activity} colorClass="bg-orange-500" onClick={() => handleStatClick('borrowed')} />
                     <StatCard title="低庫存警示" value={dashboardStats.lowStockCount} subtext="庫存低於 3 件" icon={AlertTriangle} colorClass="bg-red-500" onClick={() => handleStatClick('lowstock')} />
                     <StatCard title="管理中版次總數" value={sessions.length} icon={FolderOpen} colorClass="bg-blue-500" onClick={() =>setViewMode('sessions')} />
@@ -1007,6 +1030,21 @@ export default function App() {
                   <input type="text" placeholder="搜尋設備名稱、備註..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-teal-500"/>
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0">
+                    <div className="relative flex-shrink-0">
+                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
+                        <input 
+                          type="date" 
+                          value={searchDate} 
+                          onChange={e=>setSearchDate(e.target.value)} 
+                          className="border rounded-lg pl-10 pr-8 py-2 outline-none bg-white w-[140px] md:w-[150px] focus:ring-2 focus:ring-teal-500 text-slate-600 cursor-pointer"
+                          title="依加入日期篩選"
+                        />
+                        {searchDate && (
+                           <button onClick={()=>setSearchDate('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 bg-white">
+                              <X className="w-3.5 h-3.5"/>
+                           </button>
+                        )}
+                    </div>
                     <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="border rounded-lg px-4 py-2 outline-none bg-white min-w-[120px]">
                       <option value="all">所有分類</option>
                       {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
@@ -1041,6 +1079,7 @@ export default function App() {
                             <div>
                               <h3 className="font-bold text-lg text-slate-800 truncate">{item.name}</h3>
                               <span className="inline-block bg-slate-100 text-slate-500 text-xs px-2 py-1 rounded mt-1">{item.categoryName}</span>
+                              {item.addDate && <span className="inline-block bg-teal-50 text-teal-600 text-xs px-2 py-1 rounded mt-1 ml-1">{item.addDate}</span>}
                             </div>
                             <div className="flex gap-1">
                               <button onClick={()=>openEquipModal(item)} className="p-2 text-slate-400 hover:text-teal-600"><Edit2 className="w-4 h-4"/></button>
@@ -1096,7 +1135,11 @@ export default function App() {
                                   <div className="w-10 h-10 rounded bg-slate-100 flex items-center justify-center text-slate-300"><ImageIcon className="w-5 h-5"/></div>
                               )}
                           </td>
-                          <td className="p-4 font-medium">{item.name} <span className="text-xs text-slate-400 block">{item.note}</span></td>
+                          <td className="p-4 font-medium">
+                              {item.name} 
+                              <span className="text-xs text-slate-400 block">{item.note}</span>
+                              {item.addDate && <span className="text-xs text-teal-600 block mt-1">加入日期: {item.addDate}</span>}
+                          </td>
                           <td className="p-4">
                             <div className="flex items-center gap-3">
                               <span className="font-mono text-slate-600 bg-slate-100 px-2 py-1 rounded text-sm whitespace-nowrap">總 {item.quantity}</span>
@@ -1364,8 +1407,8 @@ export default function App() {
 
       {/* Modals (Forms) */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 overflow-y-auto max-h-[90vh]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={()=>setIsModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between mb-6 border-b pb-3">
               <h3 className="text-xl font-bold text-slate-800">
                 {modalType === 'session' && (editItem ? '編輯版次' : '新增版次')}
@@ -1402,6 +1445,12 @@ export default function App() {
                   <div><label className="text-sm font-bold text-slate-700 mb-1 block">分類</label><select className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-teal-500 outline-none bg-white" value={equipForm.categoryId} onChange={e=>setEquipForm({...equipForm, categoryId:e.target.value})} required><option value="" disabled>選擇分類</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                 </div>
                 
+                {/* 🟢 加入日期 */}
+                <div>
+                  <label className="text-sm font-bold text-slate-700 mb-1 block">加入日期 (非必填)</label>
+                  <input type="date" className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-teal-500 outline-none bg-white" value={equipForm.addDate} onChange={e=>setEquipForm({...equipForm, addDate:e.target.value})}/>
+                </div>
+
                 {/* Image Upload Section */}
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">設備照片</label>
