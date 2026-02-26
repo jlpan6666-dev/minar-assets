@@ -1236,10 +1236,61 @@ export default function App() {
              <div className="flex flex-col lg:flex-row gap-6 lg:h-full lg:overflow-hidden">
                 <div className="flex-1 lg:w-7/12 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[520px] lg:h-full lg:min-h-0">
                    <div className="p-4 border-b bg-slate-50 shrink-0">
-                      <h3 className="font-bold text-slate-700 mb-2 flex items-center gap-2"><Search className="w-4 h-4"/> 搜尋可用設備</h3>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
-                        <input type="text" placeholder="輸入名稱搜尋..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-teal-500"/>
+                      <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><Search className="w-4 h-4"/> 搜尋可用設備</h3>
+                      <div className="flex flex-col gap-3">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
+                          <input type="text" placeholder="輸入名稱搜尋..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 bg-white"/>
+                        </div>
+                        <div className="flex gap-2 overflow-x-auto pb-1">
+                            {/* 分類篩選圖示 */}
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                                <div className="relative flex items-center justify-center px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
+                                    <Filter className={`w-4 h-4 ${selectedCategoryFilter !== 'all' ? 'text-teal-600' : 'text-slate-500'}`} />
+                                    <select 
+                                      value={selectedCategoryFilter} 
+                                      onChange={e=>setSelectedCategoryFilter(e.target.value)} 
+                                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                      title="篩選分類"
+                                    >
+                                      <option value="all">所有分類</option>
+                                      {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                                    </select>
+                                </div>
+                                {selectedCategoryFilter !== 'all' && (
+                                   <div className="flex items-center gap-1 bg-teal-50 text-teal-700 px-2.5 py-1.5 rounded-lg border border-teal-200 text-xs font-bold">
+                                     {categories.find(c => c.id === selectedCategoryFilter)?.name}
+                                     <button onClick={()=>setSelectedCategoryFilter('all')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
+                                   </div>
+                                )}
+                            </div>
+
+                            {/* 排序選項圖示 */}
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                                <div className="relative flex items-center justify-center px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
+                                    <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'name' ? 'text-teal-600' : 'text-slate-500'}`} />
+                                    <select 
+                                      value={sortOption} 
+                                      onChange={e=>setSortOption(e.target.value)} 
+                                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                      title="排序方式"
+                                    >
+                                        <option value="name">名稱排序</option>
+                                        <option value="quantity_desc">數量 (多→少)</option>
+                                        <option value="quantity_asc">數量 (少→多)</option>
+                                        <option value="created_desc">最新建立</option>
+                                    </select>
+                                </div>
+                                {sortOption !== 'name' && (
+                                   <div className="flex items-center gap-1 bg-teal-50 text-teal-700 px-2.5 py-1.5 rounded-lg border border-teal-200 text-xs font-bold">
+                                     {sortOption === 'quantity_desc' && '數量 (多→少)'}
+                                     {sortOption === 'quantity_asc' && '數量 (少→多)'}
+                                     {sortOption === 'created_desc' && '最新建立'}
+                                     <button onClick={()=>setSortOption('name')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
+                                   </div>
+                                )}
+                            </div>
+                        </div>
                       </div>
                    </div>
                    <div className="flex-1 overflow-y-auto p-2 space-y-2">
