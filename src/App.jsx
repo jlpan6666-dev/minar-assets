@@ -386,6 +386,9 @@ export default function App() {
   const [borrowForm, setBorrowForm] = useState({ 
     borrower: '', phone: '', date: new Date().toISOString().slice(0,10), purpose: '', borrowDays: 7 
   });
+  
+  // 🟢 新增：手機版借用頁籤切換狀態
+  const [mobileBorrowTab, setMobileBorrowTab] = useState('equipment');
 
   // Init Auth
   useEffect(() => {
@@ -735,6 +738,7 @@ export default function App() {
       });
       await Promise.all(promises);
       setCartItems([]); setBorrowForm({ borrower: '', phone: '', date: new Date().toISOString().slice(0,10), purpose: '', borrowDays: 7 }); showToast(`成功借出 ${cartItems.length} 項設備`); setViewMode('loans'); 
+      setMobileBorrowTab('equipment'); // 🟢 借用成功後，重置手機版分頁狀態
     } catch (err) { showToast("借用失敗", "error"); } 
   };
 
@@ -1233,8 +1237,25 @@ export default function App() {
 
           {/* 🟡 [PAGINATED] Borrow Request View */}
           {viewMode === 'borrow-request' && currentSession && (
-             <div className="flex flex-col lg:flex-row gap-6 lg:h-full lg:overflow-hidden">
-                <div className="flex-1 lg:w-7/12 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[520px] lg:h-full lg:min-h-0">
+             <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 lg:h-full lg:overflow-hidden">
+                
+                {/* 🟢 新增：手機版專屬的左右切換標籤 */}
+                <div className="flex bg-slate-200 p-1 rounded-xl lg:hidden shrink-0">
+                   <button
+                     onClick={() => setMobileBorrowTab('equipment')}
+                     className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${mobileBorrowTab === 'equipment' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                   >
+                     1. 選擇設備
+                   </button>
+                   <button
+                     onClick={() => setMobileBorrowTab('form')}
+                     className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all flex justify-center items-center gap-1.5 ${mobileBorrowTab === 'form' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                   >
+                     2. 借用登記 {cartItems.length > 0 && <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full">{cartItems.length}</span>}
+                   </button>
+                </div>
+
+                <div className={`flex-1 lg:w-7/12 flex-col bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[520px] lg:h-full lg:min-h-0 ${mobileBorrowTab === 'equipment' ? 'flex' : 'hidden lg:flex'}`}>
                    <div className="p-4 border-b bg-slate-50 shrink-0">
                       <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><Search className="w-4 h-4"/> 搜尋可用設備</h3>
                       <div className="flex flex-col gap-3">
@@ -1316,7 +1337,7 @@ export default function App() {
                    <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                 </div>
 
-                <div className="flex-1 lg:w-5/12 flex flex-col gap-4 lg:overflow-y-auto lg:h-full">
+                <div className={`flex-1 lg:w-5/12 flex-col gap-4 lg:overflow-y-auto lg:h-full ${mobileBorrowTab === 'form' ? 'flex' : 'hidden lg:flex'}`}>
                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 shrink-0">
                       <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-indigo-600"/> 借用清單 ({cartItems.length})</h3>
                       {cartItems.length === 0 ? (
