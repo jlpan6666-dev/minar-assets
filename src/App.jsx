@@ -173,25 +173,50 @@ const ReturnModal = ({ isOpen, loan, onConfirm, onCancel }) => {
   );
 };
 
-// --- 元件：加入清單成功提示彈窗 ---
-const AddedToCartModal = ({ isOpen, item, onClose }) => {
-  useEffect(() => {
-    if (isOpen) {
-      const timer = setTimeout(onClose, 1500); // 1.5秒後自動關閉
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen, onClose]);
+// --- 元件：選擇借用數量視窗 ---
+const SelectQuantityModal = ({ isOpen, item, onConfirm, onCancel }) => {
+  const [qty, setQty] = useState(1);
+  const [maxQty, setMaxQty] = useState(1);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (item) {
+      setQty(1);
+      setMaxQty(item.quantity - (item.borrowedCount || 0));
+    }
+  }, [item]);
+
+  if (!isOpen || !item) return null;
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center pointer-events-none">
-      <div className="bg-slate-800/90 backdrop-blur text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 animate-in zoom-in fade-in duration-200 transform scale-110">
-        <div className="bg-teal-500 rounded-full p-2 text-white">
-          <CheckCircle className="w-6 h-6" />
-        </div>
-        <div>
-            <h4 className="font-bold text-lg">已加入借用清單</h4>
-            <p className="text-sm text-slate-300">{item?.name} x 1</p>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
+        <div className="p-6">
+          <div className="mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-indigo-100 text-indigo-600">
+            <ShoppingCart className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-900 mb-1 text-center">選擇借用數量</h3>
+          <p className="text-sm text-gray-500 mb-4 text-center">
+            {item.name}<br/>
+            <span className="text-teal-600 font-bold">最大可借: {maxQty}</span>
+          </p>
+
+          <div className="mb-6">
+            <div className="flex items-center justify-center gap-3">
+              <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200"><Minus className="w-4 h-4" /></button>
+              <input 
+                type="number" 
+                className="w-20 text-center text-2xl font-bold border-b-2 border-slate-200 focus:border-indigo-500 outline-none pb-1" 
+                value={qty} 
+                onChange={(e) => { const val = parseInt(e.target.value); if (!isNaN(val)) setQty(Math.max(1, Math.min(maxQty, val))); }} 
+              />
+              <button onClick={() => setQty(Math.min(maxQty, qty + 1))} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200"><Plus className="w-4 h-4" /></button>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button onClick={onCancel} className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors">取消</button>
+            <button onClick={() => onConfirm(item, qty)} className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium shadow-md transition-colors">確認加入</button>
+          </div>
         </div>
       </div>
     </div>
@@ -367,7 +392,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', action: null });
   const [returnDialog, setReturnDialog] = useState({ isOpen: false, loan: null }); 
-  const [addedItemModal, setAddedItemModal] = useState({ isOpen: false, item: null }); 
+  const [selectQuantityDialog, setSelectQuantityDialog] = useState({ isOpen: false, item: null }); 
   
   // Modals State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -510,19 +535,30 @@ export default function App() {
   const getAvailability = (item) => (item.quantity - (item.borrowedCount || 0));
 
   // Cart Helpers
-  const addToCart = (item) => {
-    const existing = cartItems.find(c => c.id === item.id);
+  const initiateAddToCart = (item) => {
     const available = getAvailability(item);
     if(available <= 0) { showToast("此設備已無庫存", "error"); return; }
-    
-    setAddedItemModal({ isOpen: true, item: item });
+    setSelectQuantityDialog({ isOpen: true, item });
+  };
+
+  const confirmAddToCart = (item, qty) => {
+    const existing = cartItems.find(c => c.id === item.id);
+    const available = getAvailability(item);
 
     if (existing) {
-      if (existing.borrowQty < available) setCartItems(cartItems.map(c => c.id === item.id ? { ...c, borrowQty: c.borrowQty + 1 } : c));
-      else showToast("已達最大可借數量", "error");
+      const newQty = existing.borrowQty + qty;
+      if (newQty <= available) {
+        setCartItems(cartItems.map(c => c.id === item.id ? { ...c, borrowQty: newQty } : c));
+        showToast(`已追加加入清單`);
+      } else {
+        setCartItems(cartItems.map(c => c.id === item.id ? { ...c, borrowQty: available } : c));
+        showToast(`已達最大可借數量 (${available})`, "error");
+      }
     } else {
-      setCartItems([...cartItems, { ...item, borrowQty: 1, maxQty: available }]);
+      setCartItems([...cartItems, { ...item, borrowQty: qty, maxQty: available }]);
+      showToast(`已加入借用清單`);
     }
+    setSelectQuantityDialog({ isOpen: false, item: null });
   };
 
   const removeFromCart = (id) => {
@@ -869,7 +905,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row text-slate-800 font-sans">
       <ConfirmModal isOpen={confirmDialog.isOpen} title={confirmDialog.title} message={confirmDialog.message} onConfirm={confirmDialog.action} onCancel={()=>setConfirmDialog(p=>({...p, isOpen:false}))} isDangerous={confirmDialog.isDangerous} />
       <ReturnModal isOpen={returnDialog.isOpen} loan={returnDialog.loan} onConfirm={handleReturnConfirm} onCancel={() => setReturnDialog({isOpen: false, loan: null})} />
-      <AddedToCartModal isOpen={addedItemModal.isOpen} item={addedItemModal.item} onClose={() => setAddedItemModal({isOpen: false, item: null})} />
+      <SelectQuantityModal isOpen={selectQuantityDialog.isOpen} item={selectQuantityDialog.item} onConfirm={confirmAddToCart} onCancel={() => setSelectQuantityDialog({isOpen: false, item: null})} />
       
       {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
 
@@ -1144,7 +1180,7 @@ export default function App() {
                             <span className={`font-bold ${available===0?'text-red-600':'text-green-600'}`}>剩: {available}</span>
                           </div>
                           <button 
-                            onClick={()=>addToCart(item)} 
+                            onClick={()=>initiateAddToCart(item)} 
                             disabled={available <= 0}
                             className={`w-full py-1.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 ${available <= 0 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md'}`}
                           >
@@ -1213,7 +1249,7 @@ export default function App() {
                           <td className="p-4 text-right sticky right-0 bg-white group-hover:bg-teal-50/30">
                             <div className="flex justify-end gap-2">
                               <button 
-                                onClick={()=>addToCart(item)} 
+                                onClick={()=>initiateAddToCart(item)} 
                                 disabled={available <= 0}
                                 className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all active:scale-95 whitespace-nowrap ${available <= 0 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm'}`}
                               >
@@ -1327,7 +1363,7 @@ export default function App() {
                                    <div className="text-xs text-slate-500">分類: {item.categoryName} | 庫存: <span className="text-teal-600 font-bold">{available}</span></div>
                                 </div>
                              </div>
-                             <button onClick={()=>addToCart(item)} className="bg-teal-600 text-white p-2 rounded-full hover:bg-teal-700 shadow-sm active:scale-95 flex-shrink-0"><Plus className="w-4 h-4"/></button>
+                             <button onClick={()=>initiateAddToCart(item)} className="bg-teal-600 text-white p-2 rounded-full hover:bg-teal-700 shadow-sm active:scale-95 flex-shrink-0"><Plus className="w-4 h-4"/></button>
                           </div>
                         );
                       })}
