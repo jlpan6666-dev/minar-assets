@@ -2,11 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   onAuthStateChanged, 
   signOut,
-  signInWithCustomToken,
   signInAnonymously
 } from 'firebase/auth';
 import { 
@@ -22,17 +19,17 @@ import {
   where,
   orderBy,
   increment,
-  limit,
   writeBatch,
   getDocs
 } from 'firebase/firestore';
-// 🔴 已移除 Firebase Storage 相關引用
+
 import { 
-  Beaker, ClipboardList, Settings, LogOut, Plus, Search, Trash2, Edit2, 
-  Download, Filter, AlertTriangle, User, LayoutGrid, Menu, X, CheckCircle, 
-  AlertCircle, Eye, EyeOff, ChevronRight, ChevronLeft, UserPlus, Calendar, FolderOpen,
-  History, UserCheck, Phone, ArrowLeft, Clock, FileText, Hash, Home, 
-  Activity, Box, FileDown, ArrowUpRight, ArrowDownLeft, MousePointerClick, Sparkles, MoreVertical, Timer, ShoppingCart, Minus, ArrowUpDown, Copy, Camera, Image as ImageIcon, Upload, CheckSquare
+  Beaker, Settings, LogOut, Plus, Search, Trash2, Edit2, 
+  AlertTriangle, LayoutGrid, Menu, X, CheckCircle, 
+  AlertCircle, ChevronRight, ChevronLeft, Calendar, FolderOpen,
+  History, UserCheck, Phone, Clock, FileDown, ArrowUpRight, ArrowDownLeft, 
+  MousePointerClick, Sparkles, Timer, ShoppingCart, Minus, ArrowUpDown, 
+  Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash
 } from 'lucide-react';
 
 // ==========================================
@@ -52,14 +49,13 @@ const YOUR_FIREBASE_CONFIG = {
 const app = initializeApp(YOUR_FIREBASE_CONFIG);
 const auth = getAuth(app);
 const db = getFirestore(app);
-// 🔴 已移除 const storage = getStorage(app); 
 const appId = 'lab-management-system-production';
 
 // --- 常數設定 ---
 const ITEMS_PER_PAGE = 6; // 每頁顯示 6 筆
+const SYSTEM_PASSWORD = "minar7917"; // 🟢 系統專屬登入密碼
 
 // --- 🔵 工具函式：圖片壓縮轉 Base64 ---
-// 這是為了確保圖片不會超過 Firestore 1MB 的限制
 const compressImage = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -69,7 +65,6 @@ const compressImage = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        // 設定最大寬度為 800px，高度等比例縮放
         const maxWidth = 800;
         let width = img.width;
         let height = img.height;
@@ -84,8 +79,6 @@ const compressImage = (file) => {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // 轉成 JPEG 格式，品質設定為 0.6 (60%)
-        // 這樣可以大幅減少體積，適合存入資料庫
         const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
         resolve(dataUrl);
       };
@@ -139,7 +132,7 @@ const ReturnModal = ({ isOpen, loan, onConfirm, onCancel }) => {
             {loan.equipmentName}<br/>
             (目前借用: {loan.quantity})
           </p>
-           
+            
           <div className="mb-6">
             <label className="block text-sm font-bold text-slate-700 mb-2 text-center">本次歸還數量</label>
             <div className="flex items-center justify-center gap-3">
@@ -264,59 +257,72 @@ const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick }) =>
   </div>
 );
 
-// --- 頁面：登入與註冊 ---
+// --- 頁面：專屬密碼登入 (已替換原本的 AuthScreen) ---
 const AuthScreen = () => {
-  const [isRegister, setIsRegister] = useState(false);
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // 確保一開始是登出狀態，避免殘留上次的連線紀錄
   useEffect(() => {
     const clearStaleAuth = async () => { try { await signOut(auth); } catch (e) {} };
     clearStaleAuth();
   }, []);
 
   const handleSubmit = async (e) => {
-    e.preventDefault(); setLoading(true); setError('');
+    e.preventDefault();
+    setError('');
+
+    // 檢查密碼是否符合
+    if (password !== SYSTEM_PASSWORD) {
+      setError('密碼錯誤，請重新輸入');
+      return;
+    }
+
+    setLoading(true);
     try {
-      if (isRegister) await createUserWithEmailAndPassword(auth, email, password);
-      else await signInWithEmailAndPassword(auth, email, password);
+      // 密碼正確時，使用 Firebase 匿名登入，取得系統資料庫的操作權限
+      await signInAnonymously(auth);
     } catch (err) { 
       console.error(err);
-      let msg = `登入失敗 (${err.code})`;
-      if(err.code === 'auth/invalid-email') msg = "Email 格式不正確";
-      if(err.code === 'auth/user-not-found') msg = "找不到此使用者，請先註冊";
-      if(err.code === 'auth/wrong-password') msg = "密碼錯誤";
-      if(err.code === 'auth/email-already-in-use') msg = "此 Email 已被註冊";
-      if(err.code === 'auth/weak-password') msg = "密碼太弱（至少需 6 位）";
-      if(err.code === 'auth/invalid-credential') msg = "帳號或密碼錯誤";
-      setError(msg);
-    } finally { setLoading(false); }
-  };
-
-  const handleDemoLogin = async () => {
-    setLoading(true);
-    try { await signInAnonymously(auth); } 
-    catch (err) { setError("訪客登入失敗 (請確認 Firebase 後台已啟用匿名登入)"); } 
-    finally { setLoading(false); }
+      setError("系統連線失敗，請檢查網路狀態");
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden p-8">
         <div className="text-center mb-6">
-          <div className="mx-auto w-16 h-16 bg-teal-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg"><Beaker className="w-8 h-8 text-white"/></div>
+          <div className="mx-auto w-16 h-16 bg-teal-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg">
+            <Beaker className="w-8 h-8 text-white"/>
+          </div>
           <h1 className="text-2xl font-bold text-slate-800">實驗室設備管理系統</h1>
+          <p className="text-sm text-slate-500 mt-2">請輸入管理密碼以進入系統</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full border border-slate-300 p-3 rounded-lg outline-none focus:border-teal-500" required />
-          <input type="password" placeholder="密碼 (至少6位)" value={password} onChange={e=>setPassword(e.target.value)} className="w-full border border-slate-300 p-3 rounded-lg outline-none focus:border-teal-500" required />
-          {error && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-lg flex items-center gap-2"><AlertTriangle className="w-4 h-4 flex-shrink-0"/> {error}</div>}
-          <button type="submit" disabled={loading} className="w-full bg-teal-600 text-white py-3 rounded-lg font-bold hover:bg-teal-700 transition-colors">{loading?'處理中...':(isRegister?'註冊帳號':'登入系統')}</button>
+          <input 
+            type="password" 
+            placeholder="請輸入密碼" 
+            value={password} 
+            onChange={e=>setPassword(e.target.value)} 
+            className="w-full border border-slate-300 p-3 rounded-lg outline-none focus:border-teal-500 transition-colors" 
+            required 
+            autoFocus
+          />
+          {error && (
+            <div className="p-3 bg-red-50 text-red-600 text-xs rounded-lg flex items-center gap-2 animate-in fade-in">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0"/> {error}
+            </div>
+          )}
+          <button 
+            type="submit" 
+            disabled={loading} 
+            className="w-full bg-teal-600 text-white py-3 rounded-lg font-bold hover:bg-teal-700 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {loading ? '系統登入中...' : '登入系統'}
+          </button>
         </form>
-        <button onClick={() => {setIsRegister(!isRegister); setError('')}} className="w-full mt-4 text-sm text-slate-500 hover:text-teal-600">切換為 {isRegister ? '登入' : '註冊'}</button>
-        
       </div>
     </div>
   );
@@ -354,7 +360,7 @@ export default function App() {
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const [currentLoanPage, setCurrentLoanPage] = useState(1); // 🟢 新增：借還紀錄的分頁狀態
+  const [currentLoanPage, setCurrentLoanPage] = useState(1);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
@@ -371,9 +377,8 @@ export default function App() {
   const [sessionForm, setSessionForm] = useState({ name: '', date: '', copyFromPrevious: false });
   const [equipForm, setEquipForm] = useState({ name: '', quantity: 1, categoryId: '', note: '', imageUrl: '' });
   
-  // 🔵 修改：移除了 equipImage 檔案物件 State，因為我們直接轉換成 Base64
   const [equipImagePreview, setEquipImagePreview] = useState(''); 
-  const [isCompressing, setIsCompressing] = useState(false); // 新增：圖片處理中狀態
+  const [isCompressing, setIsCompressing] = useState(false);
   
   const [catForm, setCatForm] = useState({ name: '' });
   const [cartItems, setCartItems] = useState([]);
@@ -545,13 +550,11 @@ export default function App() {
       }));
   };
 
-  // 🔵 修改：圖片處理邏輯 - 壓縮並轉 Base64
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
     if (file) {
       try {
         setIsCompressing(true);
-        // 使用壓縮工具函式
         const base64String = await compressImage(file);
         setEquipImagePreview(base64String);
         setIsCompressing(false);
@@ -673,19 +676,15 @@ export default function App() {
     });
   };
 
-  // 🔵 修改：handleSaveEquipment - 直接使用 Base64 字串儲存
   const handleSaveEquipment = async (e) => {
     e.preventDefault();
     if (!currentSession) return;
     
-    // 如果在壓縮中，阻止儲存
     if (isCompressing) {
         showToast("圖片正在處理中，請稍候...", "error");
         return;
     }
 
-    // 直接使用預覽圖 (Base64) 作為 imageUrl
-    // 如果使用者沒有更換圖片，equipImagePreview 會是原本的 Base64 或舊的 URL
     let imageUrl = equipImagePreview || '';
 
     try {
@@ -696,7 +695,7 @@ export default function App() {
         categoryId: equipForm.categoryId,
         categoryName: cat ? cat.name : '未分類',
         note: equipForm.note,
-        imageUrl: imageUrl, // 存入 Base64
+        imageUrl: imageUrl, 
         sessionId: currentSession.id,
         ...(editItem ? {} : { borrowedCount: 0 }), 
         updatedAt: serverTimestamp()
@@ -799,14 +798,12 @@ export default function App() {
     return result;
   }, [equipment, searchTerm, selectedCategoryFilter, sortOption]);
 
-  // 🟢 計算設備列表分頁
   const totalPages = Math.ceil(filteredEquipment.length / ITEMS_PER_PAGE);
   const paginatedEquipment = useMemo(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredEquipment.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   }, [filteredEquipment, currentPage]);
 
-  // 🟢 計算借還紀錄分頁
   const totalLoanPages = Math.ceil(loans.length / ITEMS_PER_PAGE);
   const paginatedLoans = useMemo(() => {
     const startIndex = (currentLoanPage - 1) * ITEMS_PER_PAGE;
@@ -827,17 +824,10 @@ export default function App() {
       setModalType('equipment'); 
       setEditItem(item); 
       setEquipForm(item ? {name: item.name, quantity: item.quantity, categoryId: item.categoryId, note: item.note, imageUrl: item.imageUrl} : {name: '', quantity: 1, categoryId: categories[0]?.id || '', note: '', imageUrl: ''}); 
-      // 直接設定 Base64 預覽
       setEquipImagePreview(item?.imageUrl || '');
       setIsModalOpen(true); 
   };
-  const openBorrowModal = (item) => {
-    const available = getAvailability(item);
-    if (available <= 0) { showToast("無庫存可借", "error"); return; }
-    setModalType('borrow');
-    setBorrowForm({ borrower: '', phone: '', purpose: '', date: new Date().toISOString().slice(0,10), equipmentId: item.id, equipmentName: item.name, quantity: 1, maxQuantity: available });
-    setIsModalOpen(true);
-  };
+
   const getExpectedReturnDate = (dateStr, days) => { if(!dateStr || !days) return ''; const d = new Date(dateStr); d.setDate(d.getDate() + parseInt(days)); return d.toISOString().slice(0,10); };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-teal-600 font-medium">系統載入中...</div>;
@@ -851,7 +841,6 @@ export default function App() {
       
       {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
 
-      {/* 🟢 [FIXED] Mobile Sidebar Overlay (z-40) */}
       {isSidebarOpen && (
         <div 
           className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm transition-opacity"
@@ -859,7 +848,6 @@ export default function App() {
         />
       )}
 
-      {/* 🟢 [FIXED] Sidebar (z-50) */}
       <aside className={`fixed md:relative z-50 w-64 bg-teal-800 text-teal-50 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
         <div className="p-6 bg-teal-900/40">
           <h1 className="text-xl font-bold flex items-center"><Beaker/> 實驗室設備管理系統</h1>
@@ -1445,7 +1433,6 @@ export default function App() {
                         <input 
                           type="file" 
                           accept="image/*" 
-                          // No capture attribute -> File Picker
                           id="equip-file-upload"
                           className="hidden"
                           onChange={handleImageChange}
