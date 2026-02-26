@@ -1030,19 +1030,22 @@ export default function App() {
                   <input type="text" placeholder="搜尋設備名稱、備註..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-teal-500"/>
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0">
-                    <div className="relative flex-shrink-0">
-                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
-                        <input 
-                          type="date" 
-                          value={searchDate} 
-                          onChange={e=>setSearchDate(e.target.value)} 
-                          className="border rounded-lg pl-10 pr-8 py-2 outline-none bg-white w-[140px] md:w-[150px] focus:ring-2 focus:ring-teal-500 text-slate-600 cursor-pointer"
-                          title="依加入日期篩選"
-                        />
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="relative flex items-center justify-center px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
+                            <Calendar className={`w-5 h-5 ${searchDate ? 'text-teal-600' : 'text-slate-500'}`} />
+                            <input 
+                              type="date" 
+                              value={searchDate} 
+                              onChange={e=>setSearchDate(e.target.value)} 
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                              title={searchDate ? `已篩選: ${searchDate}` : "依加入日期篩選"}
+                            />
+                        </div>
                         {searchDate && (
-                           <button onClick={()=>setSearchDate('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 bg-white">
-                              <X className="w-3.5 h-3.5"/>
-                           </button>
+                           <div className="flex items-center gap-1.5 bg-teal-50 text-teal-700 px-3 py-2 rounded-lg border border-teal-200 text-sm font-bold">
+                             {searchDate}
+                             <button onClick={()=>setSearchDate('')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3.5 h-3.5"/></button>
+                           </div>
                         )}
                     </div>
                     <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="border rounded-lg px-4 py-2 outline-none bg-white min-w-[120px]">
