@@ -1079,25 +1079,25 @@ export default function App() {
                     {/* 排序選項圖示 */}
                     <div className="flex items-center gap-2 flex-shrink-0">
                         <div className="relative flex items-center justify-center px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
-                            <ArrowUpDown className={`w-5 h-5 ${sortOption !== 'name' ? 'text-teal-600' : 'text-slate-500'}`} />
+                            <ArrowUpDown className={`w-5 h-5 ${sortOption !== 'created_desc' ? 'text-teal-600' : 'text-slate-500'}`} />
                             <select 
                               value={sortOption} 
                               onChange={e=>setSortOption(e.target.value)} 
                               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                               title="排序方式"
                             >
+                                <option value="created_desc" hidden>預設排序</option>
                                 <option value="name">名稱排序</option>
                                 <option value="quantity_desc">數量 (多→少)</option>
                                 <option value="quantity_asc">數量 (少→多)</option>
-                                <option value="created_desc">最新建立</option>
                             </select>
                         </div>
-                        {sortOption !== 'name' && (
+                        {sortOption !== 'created_desc' && (
                            <div className="flex items-center gap-1.5 bg-teal-50 text-teal-700 px-3 py-2 rounded-lg border border-teal-200 text-sm font-bold">
+                             {sortOption === 'name' && '名稱排序'}
                              {sortOption === 'quantity_desc' && '數量 (多→少)'}
                              {sortOption === 'quantity_asc' && '數量 (少→多)'}
-                             {sortOption === 'created_desc' && '最新建立'}
-                             <button onClick={()=>setSortOption('name')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3.5 h-3.5"/></button>
+                             <button onClick={()=>setSortOption('created_desc')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3.5 h-3.5"/></button>
                            </div>
                         )}
                     </div>
@@ -1268,25 +1268,25 @@ export default function App() {
                             {/* 排序選項圖示 */}
                             <div className="flex items-center gap-2 flex-shrink-0">
                                 <div className="relative flex items-center justify-center px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
-                                    <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'name' ? 'text-teal-600' : 'text-slate-500'}`} />
+                                    <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'created_desc' ? 'text-teal-600' : 'text-slate-500'}`} />
                                     <select 
                                       value={sortOption} 
                                       onChange={e=>setSortOption(e.target.value)} 
                                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                       title="排序方式"
                                     >
+                                        <option value="created_desc" hidden>預設排序</option>
                                         <option value="name">名稱排序</option>
                                         <option value="quantity_desc">數量 (多→少)</option>
                                         <option value="quantity_asc">數量 (少→多)</option>
-                                        <option value="created_desc">最新建立</option>
                                     </select>
                                 </div>
-                                {sortOption !== 'name' && (
+                                {sortOption !== 'created_desc' && (
                                    <div className="flex items-center gap-1 bg-teal-50 text-teal-700 px-2.5 py-1.5 rounded-lg border border-teal-200 text-xs font-bold">
+                                     {sortOption === 'name' && '名稱排序'}
                                      {sortOption === 'quantity_desc' && '數量 (多→少)'}
                                      {sortOption === 'quantity_asc' && '數量 (少→多)'}
-                                     {sortOption === 'created_desc' && '最新建立'}
-                                     <button onClick={()=>setSortOption('name')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
+                                     <button onClick={()=>setSortOption('created_desc')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
                                    </div>
                                 )}
                             </div>
