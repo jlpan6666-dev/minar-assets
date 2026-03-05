@@ -80,7 +80,7 @@ const compressImage = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const maxWidth = 800;
+        const maxWidth = 600; // 稍微調降解析度，避免超過 Firestore 1MB 單筆文件限制
         let width = img.width;
         let height = img.height;
 
@@ -94,7 +94,7 @@ const compressImage = (file) => {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.5); // 壓縮品質調整為 0.5
         resolve(dataUrl);
       };
       img.onerror = (error) => reject(error);
@@ -635,7 +635,8 @@ export default function App() {
         const cat = categories.find(c => c.id === equipForm.categoryId);
         payload = { ...payload, name: equipForm.name, quantity: parseInt(equipForm.quantity), categoryId: equipForm.categoryId, categoryName: cat ? cat.name : '未分類', note: equipForm.note, addDate: equipForm.addDate || '', ...(editItem ? {} : { borrowedCount: 0 }) };
       } else {
-        payload = { ...payload, ...propForm, ...(editItem ? {} : { createdAt: serverTimestamp() }) };
+        // 🟢 修正：確保 imageUrl 不會被 propForm 中的空字串覆蓋
+        payload = { ...payload, ...propForm, imageUrl: imagePreview || '', ...(editItem ? {} : { createdAt: serverTimestamp() }) };
       }
 
       if (editItem) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', colItemsName, editItem.id), payload);
@@ -794,8 +795,8 @@ export default function App() {
                     {viewMode === 'sessions' && (isLab ? '版次管理' : '年度盤點計畫')}
                     {viewMode === 'categories' && '分類設定'}
                     {viewMode === 'dashboard' && '首頁概覽'}
-                    {/* 🟢 移除標題後面的「清單」二字 */}
-                    {currentSession && viewMode === 'items' && `${currentSession.name} - ${isLab ? '設備' : '財產'}`}
+                    {/* 🟢 移除標題後面的「清單」與「財產」文字 */}
+                    {currentSession && viewMode === 'items' && currentSession.name}
                     {currentSession && viewMode === 'borrow-request' && `${currentSession.name} - 借用登記`}
                     {currentSession && viewMode === 'loans' && `${currentSession.name} - 借還紀錄`}
                   </h2>
@@ -1417,7 +1418,32 @@ export default function App() {
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">現值</label><input type="number" className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.value} onChange={e=>setPropForm({...propForm, value:e.target.value})}/></div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
-                        <div><label className="text-xs font-bold text-slate-600 mb-1 block">取得日期</label><input type="text" className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none bg-white`} value={propForm.acquireDate} onChange={e=>setPropForm({...propForm, acquireDate:e.target.value})} placeholder="例如: 113/05/20"/></div>
+                        {/* 🟢 取得日期加上隱藏的日期選擇器，自動轉換民國年 */}
+                        <div>
+                          <label className="text-xs font-bold text-slate-600 mb-1 block">取得日期</label>
+                          <div className="relative flex items-center">
+                            <input 
+                              type="text" 
+                              className={`w-full border border-slate-200 rounded-md p-2 pr-10 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none bg-white`} 
+                              value={propForm.acquireDate} 
+                              onChange={e=>setPropForm({...propForm, acquireDate:e.target.value})} 
+                              placeholder="例如: 113/05/20"
+                            />
+                            <input 
+                              type="date" 
+                              className="absolute right-0 top-0 bottom-0 w-10 opacity-0 cursor-pointer"
+                              onChange={(e) => {
+                                if(!e.target.value) return;
+                                const d = new Date(e.target.value);
+                                const mYear = d.getFullYear() - 1911;
+                                const mMonth = String(d.getMonth() + 1).padStart(2, '0');
+                                const mDay = String(d.getDate()).padStart(2, '0');
+                                setPropForm({...propForm, acquireDate: `${mYear}/${mMonth}/${mDay}`});
+                              }}
+                            />
+                            <Calendar className="w-4 h-4 text-slate-400 absolute right-3 pointer-events-none" />
+                          </div>
+                        </div>
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">使用年限</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.lifespan} onChange={e=>setPropForm({...propForm, lifespan:e.target.value})} placeholder="例如: 5年"/></div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
