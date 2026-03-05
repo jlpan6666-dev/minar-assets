@@ -1017,16 +1017,12 @@ export default function App() {
                            </div>
                         )}
                         <div className="flex-1 min-w-0">
-                          {/* 🟢 修改：加上 gap-2 並且限制左側文字區塊為 min-w-0 flex-1，防止長文字撐破版面 */}
+                          {/* 🟢 修改：將編輯與刪除按鈕從此處移除，讓名稱有更完整的顯示空間 */}
                           <div className="flex justify-between items-start mb-1 gap-2">
                             <div className="min-w-0 flex-1">
                               {/* 🟢 修改：將財產編號加上 truncate，過長時顯示省略號 */}
                               {!isLab && item.propId && <div className={`font-mono font-bold text-sm tracking-wider mb-0.5 truncate ${SysConfig.textClass}`}>{item.propId}</div>}
                               <h3 className="font-bold text-base text-slate-800 truncate">{item.name}</h3>
-                            </div>
-                            <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
-                              <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
-                              <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
                             </div>
                           </div>
                           
@@ -1056,20 +1052,33 @@ export default function App() {
                           {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5"/> 更新: {item.lastUpdatedStr}</div>}
                           
                           {/* Bottom Action Area */}
-                          <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between">
+                          {/* 🟢 修改：將編輯與刪除圖示移動到此處，與盤點按鈕或借用按鈕並排 */}
+                          <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between gap-2">
                             {isLab ? (
                                 <>
                                 <div className="flex gap-2 text-xs text-slate-600 font-mono">
                                     <span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span>
                                 </div>
-                                <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}>
-                                  <Plus className="w-3 h-3"/> 借用
-                                </button>
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                                      <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
+                                      <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
+                                    </div>
+                                    <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}>
+                                      <Plus className="w-3 h-3"/> 借用
+                                    </button>
+                                </div>
                                 </>
                             ) : (
+                                <>
                                 <button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
                                     {item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}
                                 </button>
+                                <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                                  <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
+                                  <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
+                                </div>
+                                </>
                             )}
                           </div>
                         </div>
