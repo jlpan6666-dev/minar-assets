@@ -57,9 +57,18 @@ const ITEMS_PER_PAGE = 6;
 
 const SYSTEM_CONFIGS = [
   { id: 'lab', name: '實驗室設備管理', icon: Beaker, pwd: 'minar7917', colorClass: 'bg-teal-600', hoverClass: 'hover:bg-teal-700', textClass: 'text-teal-600' },
-  { id: 'property_jl', name: '建良老師財產盤點', icon: Box, pwd: 'jlpan@314', colorClass: 'bg-blue-600', hoverClass: 'hover:bg-blue-700', textClass: 'text-blue-600' },
+  { id: 'property_jl', name: '建良老師財產盤點', icon: Box, pwd: 'jlpan666', colorClass: 'bg-blue-600', hoverClass: 'hover:bg-blue-700', textClass: 'text-blue-600' },
   { id: 'property_kung', name: '龔老師財產盤點', icon: Box, pwd: 'kung7917', colorClass: 'bg-indigo-600', hoverClass: 'hover:bg-indigo-700', textClass: 'text-indigo-600' }
 ];
+
+// --- 🔵 工具函式：民國日期取得 ---
+const getMinguoDateString = () => {
+  const d = new Date();
+  const minguoYear = d.getFullYear() - 1911;
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${minguoYear}/${month}/${day}`;
+};
 
 // --- 🔵 工具函式：圖片壓縮轉 Base64 ---
 const compressImage = (file) => {
@@ -119,6 +128,9 @@ const parseCSV = (text) => {
   if (val || row.length > 0) { row.push(val.trim()); result.push(row); }
   return result;
 };
+
+// --- 🔵 備用圖示 Base64 (防止破圖) ---
+const FALLBACK_IMAGE_SRC = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM5NDBhMWEiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIzIiB5PSIzIiB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHJ4PSIyIiByeT0iMiI+PC9yZWN0PjxjaXJjbGUgY3g9IjguNSIgY3k9IjguNSIgcj0iMS41Ij48L2NpcmNsZT48cG9seWxpbmUgcG9pbnRzPSIyMSAxNSAxNiAxMCA1IDIxIj48L3BvbHlsaW5lPjwvc3ZnPg==';
 
 // --- 元件：自定義確認視窗 ---
 const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel, isDangerous }) => {
@@ -685,10 +697,11 @@ export default function App() {
   const openItemModal = (item=null) => { 
       setModalType('item'); setEditItem(item); setImagePreview(item?.imageUrl || '');
       const todayStr = new Date().toISOString().slice(0, 10);
+      const minguoStr = getMinguoDateString();
       if (isLab) {
           setEquipForm(item ? { name: item.name, quantity: item.quantity, categoryId: item.categoryId, note: item.note, imageUrl: item.imageUrl, addDate: item.addDate || '' } : { name: '', quantity: 1, categoryId: categories[0]?.id || '', note: '', imageUrl: '', addDate: todayStr }); 
       } else {
-          setPropForm(item ? { propId: item.propId||'', name: item.name||'', brandModel: item.brandModel||'', value: item.value||'', acquireDate: item.acquireDate||'', lifespan: item.lifespan||'', user: item.user||'', location: item.location||'', note: item.note||'', status: item.status||'未盤點', imageUrl: item.imageUrl||'' } : { propId: '', name: '', brandModel: '', value: '', acquireDate: todayStr, lifespan: '', user: '', location: '', note: '', status: '未盤點', imageUrl: '' });
+          setPropForm(item ? { propId: item.propId||'', name: item.name||'', brandModel: item.brandModel||'', value: item.value||'', acquireDate: item.acquireDate||'', lifespan: item.lifespan||'', user: item.user||'', location: item.location||'', note: item.note||'', status: item.status||'未盤點', imageUrl: item.imageUrl||'' } : { propId: '', name: '', brandModel: '', value: '', acquireDate: minguoStr, lifespan: '', user: '', location: '', note: '', status: '未盤點', imageUrl: '' });
       }
       setIsModalOpen(true); 
   };
@@ -757,7 +770,7 @@ export default function App() {
           {currentSession && (
             <div className="mt-6 pt-6 border-t border-white/10">
               <p className={`px-4 text-xs font-bold uppercase mb-2 ${SysConfig.textClass} brightness-150`}>當前計畫：{currentSession.name}</p>
-              <button onClick={() => { setViewMode('items'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'items' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><LayoutGrid className="w-5 h-5" /> {isLab ? '設備列表' : '財產清單'}</button>
+              <button onClick={() => { setViewMode('items'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'items' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><LayoutGrid className="w-5 h-5" /> {isLab ? '設備列表' : '財產總覽'}</button>
               {isLab && (
                 <>
                 <button onClick={() => { setViewMode('borrow-request'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'borrow-request' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><ShoppingCart className="w-5 h-5" /> 借用登記</button>
@@ -781,7 +794,8 @@ export default function App() {
                     {viewMode === 'sessions' && (isLab ? '版次管理' : '年度盤點計畫')}
                     {viewMode === 'categories' && '分類設定'}
                     {viewMode === 'dashboard' && '首頁概覽'}
-                    {currentSession && viewMode === 'items' && `${currentSession.name} - ${isLab ? '設備' : '清單'}`}
+                    {/* 🟢 移除標題後面的「清單」二字 */}
+                    {currentSession && viewMode === 'items' && `${currentSession.name} - ${isLab ? '設備' : '財產'}`}
                     {currentSession && viewMode === 'borrow-request' && `${currentSession.name} - 借用登記`}
                     {currentSession && viewMode === 'loans' && `${currentSession.name} - 借還紀錄`}
                   </h2>
@@ -818,11 +832,12 @@ export default function App() {
                   <div className={`p-2 rounded-lg bg-opacity-10 text-opacity-100 ${SysConfig.colorClass.replace('bg-', 'bg-').replace('600', '100')} ${SysConfig.textClass}`}><Sparkles className="w-5 h-5"/></div>
                   <span className="text-sm font-bold text-slate-500">目前鎖定計畫：<span className={`text-base ${SysConfig.textClass}`}>{dashboardStats.latestSessionName}</span></span>
                 </div>
+                {/* 🟢 調整順序：管理中版次總數拉到最前面 */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <StatCard title={isLab ? "管理中版次總數" : "歷史計畫總數"} value={sessions.length} icon={FolderOpen} colorClass="bg-slate-700" onClick={() =>setViewMode('sessions')} />
                     <StatCard title={isLab ? "最新版次設備種類" : "清單財產總筆數"} value={dashboardStats.totalItems} icon={Box} colorClass={SysConfig.colorClass} onClick={() => handleStatClick('items')} />
                     <StatCard title={isLab ? "目前外借中" : "已完成盤點"} value={dashboardStats.totalBorrowedOrInventoried} icon={Activity} colorClass={isLab ? "bg-orange-500" : "bg-emerald-500"} onClick={() => handleStatClick('borrowed')} />
                     <StatCard title={isLab ? "低庫存警示" : "尚未盤點"} value={dashboardStats.lowStockOrUninventoried} subtext={isLab ? "庫存低於 3 件" : "待處理項目"} icon={AlertTriangle} colorClass="bg-rose-500" onClick={() => handleStatClick('lowstock')} />
-                    <StatCard title={isLab ? "管理中版次總數" : "歷史計畫總數"} value={sessions.length} icon={FolderOpen} colorClass="bg-slate-700" onClick={() =>setViewMode('sessions')} />
                 </div>
                 
                 {isLab ? (
@@ -977,7 +992,14 @@ export default function App() {
                     const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
                     return (
                       <div key={item.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex gap-3 relative">
-                        {item.imageUrl && <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100"><img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" /></div>}
+                        {item.imageUrl ? (
+                           <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100"><img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/></div>
+                        ) : (
+                           <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
+                             <ImageIcon className="w-5 h-5 mb-1"/>
+                             <span className="text-[10px]">無照片</span>
+                           </div>
+                        )}
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-start mb-1">
                             <div>
@@ -990,19 +1012,30 @@ export default function App() {
                             </div>
                           </div>
                           
+                          {/* 🟢 財產詳細資料展示 (手機版) */}
+                          {!isLab && (
+                             <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-2 mb-2 text-[10px] text-slate-600 bg-slate-50 p-2 rounded-lg">
+                                <div className="truncate"><span className="text-slate-400">廠牌:</span> {item.brandModel || '-'}</div>
+                                <div className="truncate"><span className="text-slate-400">現值:</span> ${item.value || 0}</div>
+                                <div className="truncate"><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div>
+                                <div className="truncate"><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
+                                <div className="col-span-2 truncate"><span className="text-slate-400">備註:</span> {item.note || '-'}</div>
+                             </div>
+                          )}
+
                           {/* Tags & Meta */}
                           <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                             {isLab ? (
                                 <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.categoryName}</span>
                             ) : (
                                 <>
-                                <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.location || '無地點'}</span>
                                 {item.user && <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5"><UserCheck className="w-3 h-3"/>{item.user}</span>}
+                                <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.location || '無地點'}</span>
                                 </>
                             )}
-                            {item.addDate && <span className={`inline-block bg-opacity-10 text-[10px] px-1.5 py-0.5 rounded font-bold ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')} ${SysConfig.textClass}`}>{item.addDate}</span>}
+                            {item.addDate && isLab && <span className={`inline-block bg-opacity-10 text-[10px] px-1.5 py-0.5 rounded font-bold ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')} ${SysConfig.textClass}`}>{item.addDate}</span>}
                           </div>
-                          {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5"/> {item.lastUpdatedStr}</div>}
+                          {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5"/> 更新: {item.lastUpdatedStr}</div>}
                           
                           {/* Bottom Action Area */}
                           <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between">
@@ -1046,11 +1079,13 @@ export default function App() {
                             </>
                         ) : (
                             <>
-                            <th className="p-3 font-semibold w-1/4">財產編號 / 名稱</th>
-                            <th className="p-3 font-semibold w-1/6">存放地點 / 使用人</th>
-                            <th className="p-3 font-semibold w-1/6">現值 / 年限</th>
-                            <th className="p-3 font-semibold w-1/6 text-center">盤點狀態</th>
-                            <th className="p-3 font-semibold text-right w-1/6">操作</th>
+                            {/* 🟢 財產桌面版表頭調整 */}
+                            <th className="p-3 font-semibold w-[20%]">財產編號 / 名稱</th>
+                            <th className="p-3 font-semibold w-[15%]">廠牌型別</th>
+                            <th className="p-3 font-semibold w-[15%]">使用人 / 存置地點</th>
+                            <th className="p-3 font-semibold w-[20%]">取得日期 / 現值 / 年限</th>
+                            <th className="p-3 font-semibold w-[10%] text-center">狀態</th>
+                            <th className="p-3 font-semibold text-right w-[15%]">操作</th>
                             </>
                         )}
                         </tr>
@@ -1063,9 +1098,14 @@ export default function App() {
                             <td className="p-3 text-center align-top pt-4">
                                 {item.imageUrl ? (
                                     <a href={item.imageUrl} target="_blank" rel="noopener noreferrer" className="inline-block w-10 h-10 rounded-lg overflow-hidden border border-slate-200 hover:scale-150 transition-transform origin-left shadow-sm">
-                                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" />
+                                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
                                     </a>
-                                ) : <div className="w-10 h-10 mx-auto rounded-lg bg-slate-100 flex items-center justify-center text-slate-300"><ImageIcon className="w-4 h-4"/></div>}
+                                ) : (
+                                    <div className="w-10 h-10 mx-auto rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
+                                        <ImageIcon className="w-4 h-4 mb-0.5"/>
+                                        <span className="text-[8px] leading-none scale-90 font-bold">無照片</span>
+                                    </div>
+                                )}
                             </td>
                             {isLab ? (
                                 <>
@@ -1097,19 +1137,23 @@ export default function App() {
                                 </>
                             ) : (
                                 <>
+                                {/* 🟢 財產詳細資料展示 (電腦版) */}
                                 <td className="p-3 align-top">
                                     <div className="font-mono text-[10px] text-slate-400 mb-0.5">{item.propId || '無編號'}</div>
                                     <div className="font-bold text-slate-800 text-sm">{item.name}</div>
-                                    <div className="text-[10px] text-slate-500 mt-0.5">{item.brandModel}</div>
                                     {item.lastUpdatedStr && <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
                                 </td>
-                                <td className="p-3 align-top">
-                                    <div className="text-sm font-medium text-slate-700">{item.location || '-'}</div>
-                                    <div className="text-xs text-slate-500 mt-1 flex items-center gap-1"><UserCheck className="w-3 h-3"/> {item.user || '-'}</div>
+                                <td className="p-3 align-top text-xs text-slate-600">
+                                    {item.brandModel || '-'}
                                 </td>
                                 <td className="p-3 align-top">
-                                    <div className="text-sm font-mono text-slate-700">${item.value || 0}</div>
-                                    <div className="text-[10px] text-slate-500 mt-1">年限: {item.lifespan || '-'} / 取得: {item.acquireDate || '-'}</div>
+                                    <div className="text-sm font-medium text-slate-700 flex items-center gap-1"><UserCheck className="w-3.5 h-3.5 text-slate-400"/> {item.user || '-'}</div>
+                                    <div className="text-xs text-slate-500 mt-1">{item.location || '-'}</div>
+                                </td>
+                                <td className="p-3 align-top text-xs text-slate-600 space-y-1">
+                                    <div><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div>
+                                    <div><span className="text-slate-400">現值:</span> <span className="font-mono">${item.value || 0}</span></div>
+                                    <div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
                                 </td>
                                 <td className="p-3 align-top text-center">
                                     <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀態">
@@ -1118,7 +1162,7 @@ export default function App() {
                                 </td>
                                 <td className="p-3 text-right align-top">
                                     <div className="flex justify-end gap-1">
-                                    <button onClick={()=>openItemModal(item)} className="p-1.5 text-slate-400 hover:text-blue-600 bg-transparent hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4"/></button>
+                                    <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button>
                                     <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
                                     </div>
                                 </td>
@@ -1127,7 +1171,7 @@ export default function App() {
                             </tr>
                         );
                         })}
-                        {filteredItems.length === 0 && <tr><td colSpan="5" className="p-12 text-center text-slate-400">沒有找到相符資料</td></tr>}
+                        {filteredItems.length === 0 && <tr><td colSpan="6" className="p-12 text-center text-slate-400">沒有找到相符資料</td></tr>}
                     </tbody>
                     </table>
                 </div>
@@ -1177,7 +1221,7 @@ export default function App() {
                         return (
                           <div key={item.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-100 hover:border-teal-300 transition-colors shadow-sm">
                              <div className="flex items-center gap-3 min-w-0">
-                                {item.imageUrl && <img src={item.imageUrl} alt="" className="w-10 h-10 rounded-md object-cover border border-slate-100 flex-shrink-0"/>}
+                                {item.imageUrl ? <img src={item.imageUrl} alt="" className="w-10 h-10 rounded-md object-cover border border-slate-100 flex-shrink-0" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/> : <div className="w-10 h-10 rounded-md bg-slate-50 border border-slate-100 flex flex-col items-center justify-center flex-shrink-0 text-slate-300"><ImageIcon className="w-4 h-4"/></div>}
                                 <div className="min-w-0 pr-2">
                                    <div className="font-bold text-slate-700 truncate text-sm">{item.name}</div>
                                    <div className="text-[10px] text-slate-500 mt-0.5">分類: {item.categoryName} | 庫存: <span className="text-teal-600 font-bold">{available}</span></div>
@@ -1373,12 +1417,13 @@ export default function App() {
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">現值</label><input type="number" className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.value} onChange={e=>setPropForm({...propForm, value:e.target.value})}/></div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
-                        <div><label className="text-xs font-bold text-slate-600 mb-1 block">取得日期</label><input type="date" className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none bg-white`} value={propForm.acquireDate} onChange={e=>setPropForm({...propForm, acquireDate:e.target.value})}/></div>
+                        <div><label className="text-xs font-bold text-slate-600 mb-1 block">取得日期</label><input type="text" className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none bg-white`} value={propForm.acquireDate} onChange={e=>setPropForm({...propForm, acquireDate:e.target.value})} placeholder="例如: 113/05/20"/></div>
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">使用年限</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.lifespan} onChange={e=>setPropForm({...propForm, lifespan:e.target.value})} placeholder="例如: 5年"/></div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
-                        <div><label className="text-xs font-bold text-slate-600 mb-1 block">存置地點</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.location} onChange={e=>setPropForm({...propForm, location:e.target.value})}/></div>
+                        {/* 🟢 交換位置：使用人移到存置地點前面 */}
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">使用人</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.user} onChange={e=>setPropForm({...propForm, user:e.target.value})}/></div>
+                        <div><label className="text-xs font-bold text-slate-600 mb-1 block">存置地點</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.location} onChange={e=>setPropForm({...propForm, location:e.target.value})}/></div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">狀態</label><select className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none bg-white`} value={propForm.status} onChange={e=>setPropForm({...propForm, status:e.target.value})}><option value="未盤點">未盤點</option><option value="已盤點">已盤點</option></select></div>
