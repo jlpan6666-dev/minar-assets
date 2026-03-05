@@ -385,6 +385,7 @@ export default function App() {
   const [cartItems, setCartItems] = useState([]);
   const [borrowForm, setBorrowForm] = useState({ borrower: '', phone: '', date: new Date().toISOString().slice(0,10), purpose: '', borrowDays: 7 });
   const [mobileBorrowTab, setMobileBorrowTab] = useState('equipment');
+  const [fullScreenImage, setFullScreenImage] = useState(null); // 🟢 新增：全螢幕圖片預覽狀態
 
   // DB Path Helpers
   const colSessionsName = appMode === 'lab' ? 'sessions' : `sessions_${appMode}`;
@@ -536,7 +537,10 @@ export default function App() {
                 const user = row[6] || '';
                 const location = row[7] || '';
                 const note = row[8] || '';
-                const status = row[9] || '未盤點';
+                
+                // 🟢 修改：檢查盤點狀態若為空白則設為未盤點
+                const statusRaw = row[9] ? row[9].trim() : '';
+                const status = statusRaw === '' ? '未盤點' : statusRaw;
 
                 const newRef = doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName));
                 batch.set(newRef, {
@@ -757,6 +761,14 @@ export default function App() {
       <SelectQuantityModal isOpen={selectQuantityDialog.isOpen} item={selectQuantityDialog.item} onConfirm={confirmAddToCart} onCancel={() => setSelectQuantityDialog({isOpen: false, item: null})} />
       {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
       {isSidebarOpen && <div className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm transition-opacity" onClick={() => setIsSidebarOpen(false)} />}
+
+      {/* 🟢 新增：全螢幕圖片放大視窗 */}
+      {fullScreenImage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setFullScreenImage(null)}>
+          <button onClick={() => setFullScreenImage(null)} className="absolute top-4 right-4 text-white hover:text-slate-300 p-2 bg-black/50 rounded-full transition-colors"><X className="w-8 h-8"/></button>
+          <img src={fullScreenImage} alt="全螢幕預覽" className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
 
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 w-64 bg-slate-900 text-slate-100 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
@@ -994,7 +1006,10 @@ export default function App() {
                     return (
                       <div key={item.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex gap-3 relative">
                         {item.imageUrl ? (
-                           <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100"><img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/></div>
+                           <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100">
+                             {/* 🟢 修改：增加點擊放大的 onClick 事件 */}
+                             <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={() => setFullScreenImage(item.imageUrl)} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
+                           </div>
                         ) : (
                            <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
                              <ImageIcon className="w-5 h-5 mb-1"/>
@@ -1098,9 +1113,9 @@ export default function App() {
                             <tr key={item.id} className="hover:bg-slate-50/50 transition-colors group">
                             <td className="p-3 text-center align-top pt-4">
                                 {item.imageUrl ? (
-                                    <a href={item.imageUrl} target="_blank" rel="noopener noreferrer" className="inline-block w-10 h-10 rounded-lg overflow-hidden border border-slate-200 hover:scale-150 transition-transform origin-left shadow-sm">
+                                    <div onClick={() => setFullScreenImage(item.imageUrl)} className="inline-block w-10 h-10 rounded-lg overflow-hidden border border-slate-200 hover:scale-150 transition-transform origin-left shadow-sm cursor-pointer">
                                         <img src={item.imageUrl} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
-                                    </a>
+                                    </div>
                                 ) : (
                                     <div className="w-10 h-10 mx-auto rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
                                         <ImageIcon className="w-4 h-4 mb-0.5"/>
