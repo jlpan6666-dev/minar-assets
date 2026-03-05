@@ -57,7 +57,7 @@ const ITEMS_PER_PAGE = 6;
 
 const SYSTEM_CONFIGS = [
   { id: 'lab', name: '實驗室設備管理', icon: Beaker, pwd: 'minar7917', colorClass: 'bg-teal-600', hoverClass: 'hover:bg-teal-700', textClass: 'text-teal-600' },
-  { id: 'property_jl', name: '建良老師財產盤點', icon: Box, pwd: 'jlpan666', colorClass: 'bg-blue-600', hoverClass: 'hover:bg-blue-700', textClass: 'text-blue-600' },
+  { id: 'property_jl', name: '建良老師財產盤點', icon: Box, pwd: 'jlpan@314', colorClass: 'bg-blue-600', hoverClass: 'hover:bg-blue-700', textClass: 'text-blue-600' },
   { id: 'property_kung', name: '龔老師財產盤點', icon: Box, pwd: 'kung7917', colorClass: 'bg-indigo-600', hoverClass: 'hover:bg-indigo-700', textClass: 'text-indigo-600' }
 ];
 
