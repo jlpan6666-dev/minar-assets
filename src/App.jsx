@@ -1019,8 +1019,9 @@ export default function App() {
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-start mb-1">
                             <div>
+                              {/* 🟢 修改：將財產編號移至上方，放大並套用主題色 */}
+                              {!isLab && item.propId && <div className={`font-mono font-bold text-sm tracking-wider mb-0.5 ${SysConfig.textClass}`}>{item.propId}</div>}
                               <h3 className="font-bold text-base text-slate-800 truncate pr-2">{item.name}</h3>
-                              {!isLab && item.propId && <span className="font-mono text-xs text-slate-400 block">{item.propId}</span>}
                             </div>
                             <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
                               <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
@@ -1155,7 +1156,8 @@ export default function App() {
                                 <>
                                 {/* 🟢 財產詳細資料展示 (電腦版) */}
                                 <td className="p-3 align-top">
-                                    <div className="font-mono text-[10px] text-slate-400 mb-0.5">{item.propId || '無編號'}</div>
+                                    {/* 🟢 修改：將財產編號放大並套用主題色 */}
+                                    <div className={`font-mono font-bold text-sm tracking-wider mb-1 ${SysConfig.textClass}`}>{item.propId || '無編號'}</div>
                                     <div className="font-bold text-slate-800 text-sm">{item.name}</div>
                                     {item.lastUpdatedStr && <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
                                 </td>
