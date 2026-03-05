@@ -57,7 +57,7 @@ const ITEMS_PER_PAGE = 6;
 
 const SYSTEM_CONFIGS = [
   { id: 'lab', name: '實驗室設備管理', icon: Beaker, pwd: 'minar7917', colorClass: 'bg-teal-600', hoverClass: 'hover:bg-teal-700', textClass: 'text-teal-600' },
-  { id: 'property_jl', name: '建良老師財產盤點', icon: Box, pwd: 'jlpan@314', colorClass: 'bg-blue-600', hoverClass: 'hover:bg-blue-700', textClass: 'text-blue-600' },
+  { id: 'property_jl', name: '建良老師設備管理', icon: Box, pwd: 'jlpan@314', colorClass: 'bg-blue-600', hoverClass: 'hover:bg-blue-700', textClass: 'text-blue-600' },
   { id: 'property_kung', name: '龔老師財產盤點', icon: Box, pwd: 'kung7917', colorClass: 'bg-indigo-600', hoverClass: 'hover:bg-indigo-700', textClass: 'text-indigo-600' }
 ];
 
@@ -1017,11 +1017,12 @@ export default function App() {
                            </div>
                         )}
                         <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-start mb-1">
-                            <div>
-                              {/* 🟢 修改：將財產編號移至上方，放大並套用主題色 */}
-                              {!isLab && item.propId && <div className={`font-mono font-bold text-sm tracking-wider mb-0.5 ${SysConfig.textClass}`}>{item.propId}</div>}
-                              <h3 className="font-bold text-base text-slate-800 truncate pr-2">{item.name}</h3>
+                          {/* 🟢 修改：加上 gap-2 並且限制左側文字區塊為 min-w-0 flex-1，防止長文字撐破版面 */}
+                          <div className="flex justify-between items-start mb-1 gap-2">
+                            <div className="min-w-0 flex-1">
+                              {/* 🟢 修改：將財產編號加上 truncate，過長時顯示省略號 */}
+                              {!isLab && item.propId && <div className={`font-mono font-bold text-sm tracking-wider mb-0.5 truncate ${SysConfig.textClass}`}>{item.propId}</div>}
+                              <h3 className="font-bold text-base text-slate-800 truncate">{item.name}</h3>
                             </div>
                             <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
                               <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
@@ -1315,7 +1316,11 @@ export default function App() {
                     </div>
                     <div className="space-y-2 mb-4">
                       <div className="flex justify-between"><span className="text-sm font-bold text-slate-700">{loan.borrower}</span><span className="text-xs text-slate-500 flex items-center gap-1"><Phone className="w-3 h-3"/> {loan.phone}</span></div>
-                      <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-sm font-medium text-slate-800 flex justify-between items-center">{loan.equipmentName}<span className="bg-white border border-slate-200 px-2 py-0.5 rounded text-xs text-slate-600 shadow-sm">x{loan.quantity}</span></div>
+                      {/* 🟢 修改：為借用紀錄的設備名稱加上 truncate 防止超長撐破 */}
+                      <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-sm font-medium text-slate-800 flex justify-between items-center gap-2">
+                        <span className="truncate">{loan.equipmentName}</span>
+                        <span className="bg-white border border-slate-200 px-2 py-0.5 rounded text-xs text-slate-600 shadow-sm flex-shrink-0">x{loan.quantity}</span>
+                      </div>
                       {loan.purpose && <div className="text-xs text-slate-500 mt-1 px-1">用途: {loan.purpose}</div>}
                     </div>
                     {loan.status === 'borrowed' ? <button onClick={()=>initiateReturn(loan.id)} className="w-full py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg text-sm font-bold shadow-sm flex items-center justify-center gap-2 transition-colors"><CheckCircle className="w-4 h-4"/> 確認歸還</button> : <div className="text-center text-xs text-emerald-600 py-2 bg-emerald-50 rounded-lg font-medium border border-emerald-100">歸還日期: {loan.returnDate}</div>}
