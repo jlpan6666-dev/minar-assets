@@ -280,6 +280,7 @@ const AuthScreen = ({ setAppMode }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
+      {/* Background decoration */}
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-200/30 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -358,7 +359,7 @@ export default function App() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all'); 
   const [sortOption, setSortOption] = useState('created_desc'); 
   
-  // 🟢 新增：多重選取模式狀態
+  // 🟢 多重選取模式狀態
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState([]);
 
@@ -393,6 +394,9 @@ export default function App() {
   const [mobileBorrowTab, setMobileBorrowTab] = useState('equipment');
   const [fullScreenImage, setFullScreenImage] = useState(null); 
 
+  // 🟢 齒輪管理選單狀態
+  const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+
   // DB Path Helpers
   const colSessionsName = appMode === 'lab' ? 'sessions' : `sessions_${appMode}`;
   const colTablesName = appMode === 'lab' ? null : `tables_${appMode}`; 
@@ -421,6 +425,7 @@ export default function App() {
     setSearchTerm(''); setSearchDate(''); setSearchStatus('all'); setSelectedCategoryFilter('all');
     setIsSelectionMode(false);
     setSelectedItemIds([]);
+    setIsActionMenuOpen(false);
   }, [appMode]);
 
   // Reset Pagination & Selection when Filters/View Change
@@ -428,6 +433,7 @@ export default function App() {
     setCurrentPage(1); setCurrentLoanPage(1); 
     setIsSelectionMode(false);
     setSelectedItemIds([]);
+    setIsActionMenuOpen(false);
   }, [searchTerm, searchDate, searchStatus, selectedCategoryFilter, sortOption, viewMode, currentSession, currentTable]);
 
   // Global Listeners (Categories & Sessions)
@@ -615,7 +621,6 @@ export default function App() {
     reader.readAsArrayBuffer(file);
   };
 
-  // 🟢 Excel 匯出功能 (支援匯出「全部」或「特定選取」項目)
   const handleExportExcel = async (sessionToExport = currentSession, exportSelectedOnly = false) => {
     if (!sessionToExport) return;
 
@@ -632,7 +637,6 @@ export default function App() {
             baseList = itemsList.filter(i => i.tableId === currentTable.id);
         }
         
-        // 🟢 若為特定選取匯出
         if (exportSelectedOnly && selectedItemIds.length > 0) {
             exportItems = baseList.filter(i => selectedItemIds.includes(i.id));
         } else {
@@ -671,7 +675,6 @@ export default function App() {
     const selectionPrefix = exportSelectedOnly ? '_選取項目' : '';
     XLSX.writeFile(workbook, `${sessionToExport.name}${tablePrefix}${selectionPrefix}_清單.xlsx`);
     
-    // 匯出後自動關閉選取模式
     if (exportSelectedOnly) {
         setIsSelectionMode(false);
         setSelectedItemIds([]);
@@ -716,7 +719,6 @@ export default function App() {
     });
   };
 
-  // 🟢 批次刪除選取項目
   const handleDeleteSelected = () => {
     setConfirmDialog({
         isOpen: true,
@@ -923,7 +925,6 @@ export default function App() {
   const totalLoanPages = Math.ceil(loans.length / ITEMS_PER_PAGE);
   const paginatedLoans = useMemo(() => { const startIndex = (currentLoanPage - 1) * ITEMS_PER_PAGE; return loans.slice(startIndex, startIndex + ITEMS_PER_PAGE); }, [loans, currentLoanPage]);
 
-  // 🟢 多重選取輔助函式
   const toggleSelection = (id) => {
       setSelectedItemIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
@@ -1064,8 +1065,8 @@ export default function App() {
              </div>
           </div>
           
-          {/* 🟢 Header Actions - 增加多重選取按鈕與批次操作 */}
-          <div className="flex gap-2 flex-shrink-0">
+          {/* 🟢 Header Actions */}
+          <div className="flex gap-2 flex-shrink-0 items-center">
             {viewMode === 'items' && (
               isSelectionMode ? (
                 <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
@@ -1082,20 +1083,38 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                <button onClick={() => setIsSelectionMode(true)} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95">
-                  <ListChecks className={`w-4 h-4 ${SysConfig.textClass}`}/> <span className="hidden sm:inline font-bold">選取</span>
-                </button>
-                <button onClick={()=>handleExportExcel()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95">
-                  <FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯出 Excel</span>
-                </button>
-                {!isLab && currentTable && (
-                  <>
-                  <input type="file" accept=".xlsx, .xls" ref={fileInputRef} className="hidden" onChange={handleImportExcel} />
-                  <button onClick={()=>fileInputRef.current?.click()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯入 Excel</span></button>
-                  </>
-                )}
+                {/* 🟢 齒輪選單：匯出/匯入 Excel */}
+                <div className="relative">
+                  <button 
+                    onClick={() => setIsActionMenuOpen(!isActionMenuOpen)}
+                    className="bg-white border border-slate-200 text-slate-700 p-2.5 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-sm transition-all active:scale-95"
+                    title="資料管理 (匯入/匯出)"
+                  >
+                    <Settings className="w-4 h-4 text-slate-600"/>
+                  </button>
+                  
+                  {isActionMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsActionMenuOpen(false)}></div>
+                      <div className="absolute right-0 mt-2 w-44 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-200">
+                        <button onClick={() => { handleExportExcel(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors">
+                          <FileDown className="w-4 h-4 text-emerald-600"/> 匯出清單 Excel
+                        </button>
+                        {!isLab && currentTable && (
+                          <>
+                            <input type="file" accept=".xlsx, .xls" ref={fileInputRef} className="hidden" onChange={(e) => { handleImportExcel(e); setIsActionMenuOpen(false); }} />
+                            <button onClick={() => { fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors">
+                              <FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel 資料
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+
                 {(isLab || currentTable) && (
-                  <button onClick={()=>openItemModal()} className={`text-white px-3 py-2 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>
+                  <button onClick={()=>openItemModal()} className={`text-white px-3 py-2.5 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>
                 )}
                 </>
               )
@@ -1296,6 +1315,24 @@ export default function App() {
                                  <button onClick={()=>setSortOption('created_desc')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
                                </div>
                             )}
+                        </div>
+
+                        {/* 🟢 選取按鈕移至排序旁邊 */}
+                        <div className="flex items-center gap-1 flex-shrink-0 border-l border-slate-200 pl-2 ml-1">
+                            <button 
+                              onClick={() => {
+                                if (isSelectionMode) {
+                                  setIsSelectionMode(false);
+                                  setSelectedItemIds([]);
+                                } else {
+                                  setIsSelectionMode(true);
+                                }
+                              }} 
+                              className={`flex items-center justify-center px-3 py-2 border rounded-lg transition-colors cursor-pointer gap-1.5 shadow-sm text-sm font-bold ${isSelectionMode ? `bg-${themeColor}-50 border-${themeColor}-300 ${SysConfig.textClass}` : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                            >
+                              <ListChecks className={`w-4 h-4 ${isSelectionMode ? SysConfig.textClass : 'text-slate-500'}`} />
+                              <span className="hidden sm:inline">{isSelectionMode ? '取消選取' : '多重選取'}</span>
+                            </button>
                         </div>
                     </div>
                   </div>
@@ -1746,7 +1783,7 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className={`text-xl font-bold ${SysConfig.textClass} flex items-center gap-2`}>
-                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯計畫') : (isLab ? '新增版次' : '建立年度清單'))}
+                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯清單') : (isLab ? '新增版次' : '建立年度清單'))}
                 {modalType === 'table' && (editItem ? '編輯表單名稱' : '新增表單')}
                 {modalType === 'item' && (editItem ? (isLab ? '編輯設備' : '編輯財產') : (isLab ? '新增設備' : '新增財產'))}
                 {modalType === 'category' && (editItem ? '編輯分類' : '新增分類')}
