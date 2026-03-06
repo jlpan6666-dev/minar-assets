@@ -30,7 +30,7 @@ import {
   History, UserCheck, Phone, Clock, FileDown, ArrowUpRight, ArrowDownLeft, 
   MousePointerClick, Sparkles, Timer, ShoppingCart, Minus, ArrowUpDown, 
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
-  FileSpreadsheet, Check, XCircle
+  FileSpreadsheet, Check, XCircle, ListChecks
 } from 'lucide-react';
 
 // ==========================================
@@ -280,7 +280,6 @@ const AuthScreen = ({ setAppMode }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
-      {/* Background decoration */}
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-200/30 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -342,8 +341,8 @@ export default function App() {
 
   // Data State
   const [sessions, setSessions] = useState([]);
-  const [tables, setTables] = useState([]); // 🟢 新增：表單 (Tabs) 資料
-  const [currentTable, setCurrentTable] = useState(null); // 🟢 新增：目前選取的表單
+  const [tables, setTables] = useState([]); 
+  const [currentTable, setCurrentTable] = useState(null); 
 
   const [itemsList, setItemsList] = useState([]); 
   const [categories, setCategories] = useState([]);
@@ -359,6 +358,10 @@ export default function App() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all'); 
   const [sortOption, setSortOption] = useState('created_desc'); 
   
+  // 🟢 新增：多重選取模式狀態
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
+
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [currentLoanPage, setCurrentLoanPage] = useState(1);
@@ -376,7 +379,7 @@ export default function App() {
   
   // Forms State
   const [sessionForm, setSessionForm] = useState({ name: '', date: '', year: '', stage: '初盤', copyFromPrevious: false });
-  const [tableForm, setTableForm] = useState({ name: '' }); // 🟢 新增：表單新增/修改 Form
+  const [tableForm, setTableForm] = useState({ name: '' }); 
   const [equipForm, setEquipForm] = useState({ name: '', quantity: 1, categoryId: '', note: '', imageUrl: '', addDate: '' });
   const [propForm, setPropForm] = useState({ propId: '', name: '', brandModel: '', value: '', acquireDate: '', lifespan: '', user: '', location: '', note: '', status: '未盤點', imageUrl: '' });
   
@@ -392,24 +395,40 @@ export default function App() {
 
   // DB Path Helpers
   const colSessionsName = appMode === 'lab' ? 'sessions' : `sessions_${appMode}`;
-  const colTablesName = appMode === 'lab' ? null : `tables_${appMode}`; // 🟢 只有財產管理需要多表單
+  const colTablesName = appMode === 'lab' ? null : `tables_${appMode}`; 
   const colItemsName = appMode === 'lab' ? 'equipment' : `items_${appMode}`;
   const isLab = appMode === 'lab';
   const themeColor = isLab ? 'teal' : appMode === 'property_jl' ? 'blue' : 'indigo';
 
+  useEffect(() => {
+    if (!document.getElementById('xlsx-lib')) {
+      const script = document.createElement('script');
+      script.id = 'xlsx-lib';
+      script.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  }, []);
+
   // Init Auth
   useEffect(() => { const unsubscribe = onAuthStateChanged(auth, u => { setUser(u); setLoading(false); }); return () => unsubscribe(); }, []);
 
-  // Reset Filters & Navigation on Mode Change
+  // Reset Filters, Selection & Navigation on Mode Change
   useEffect(() => {
     setViewMode('dashboard');
     setCurrentSession(null);
     setCurrentTable(null);
     setSearchTerm(''); setSearchDate(''); setSearchStatus('all'); setSelectedCategoryFilter('all');
+    setIsSelectionMode(false);
+    setSelectedItemIds([]);
   }, [appMode]);
 
-  // Reset Pagination when Filters Change
-  useEffect(() => { setCurrentPage(1); setCurrentLoanPage(1); }, [searchTerm, searchDate, searchStatus, selectedCategoryFilter, sortOption, viewMode, currentSession, currentTable]);
+  // Reset Pagination & Selection when Filters/View Change
+  useEffect(() => { 
+    setCurrentPage(1); setCurrentLoanPage(1); 
+    setIsSelectionMode(false);
+    setSelectedItemIds([]);
+  }, [searchTerm, searchDate, searchStatus, selectedCategoryFilter, sortOption, viewMode, currentSession, currentTable]);
 
   // Global Listeners (Categories & Sessions)
   useEffect(() => {
@@ -421,23 +440,17 @@ export default function App() {
     return () => { unsubCat(); unsubSess(); };
   }, [user, appMode, isLab, colSessionsName]);
 
-  // 🟢 監聽當前清單底下的「表單 (Tables)」資料 (Only for Property Modes)
   useEffect(() => {
     if (!user || !currentSession || isLab || !colTablesName) {
         setTables([]);
         setCurrentTable(null);
         return;
     }
-    // Remove orderBy to prevent index requirement issue when querying by sessionId
     const qTables = query(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), where('sessionId', '==', currentSession.id));
     const unsubTables = onSnapshot(qTables, snap => {
         const fetchedTables = snap.docs.map(d => ({id: d.id, ...d.data()}));
-        
-        // 🟢 Sort in javascript to avoid the need for a composite index
         fetchedTables.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
         setTables(fetchedTables);
-        
-        // Auto-select table if not selected or current one was deleted
         setCurrentTable(prev => {
             if (!prev && fetchedTables.length > 0) return fetchedTables[0];
             if (prev && !fetchedTables.find(t => t.id === prev.id)) return fetchedTables.length > 0 ? fetchedTables[0] : null;
@@ -529,44 +542,60 @@ export default function App() {
     }
   };
 
-  // CSV Import for Property
-  const handleImportCSV = async (e) => {
+  const handleImportExcel = async (e) => {
     const file = e.target.files[0];
-    // 🟢 如果沒有選擇表單，阻擋匯入
     if (!file || !currentSession || isLab || !currentTable) return;
     
+    if (!window.XLSX) {
+      showToast("Excel 模組載入中，請稍後再試", "error");
+      return;
+    }
+    const XLSX = window.XLSX;
+
     const reader = new FileReader();
     reader.onload = async (event) => {
-        const text = event.target.result;
-        const rows = parseCSV(text);
-        if (rows.length < 2) { showToast("CSV 格式錯誤或無資料", "error"); return; }
-
-        let successCount = 0;
         try {
+            const data = new Uint8Array(event.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+            if (rows.length < 2) { showToast("Excel 格式錯誤或無資料", "error"); return; }
+
+            const headerRow = rows[0] || [];
+            let offset = 0;
+            if (headerRow[0] === "所屬表單") {
+                offset = 1;
+            }
+
             const batch = writeBatch(db);
             const nowTime = new Date().toISOString().split('T')[0];
+            let successCount = 0;
 
             for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
-                if (row.length < 2) continue; 
+                if (row.length === 0) continue; 
                 
-                const propId = row[0] || '';
-                const name = row[1] || '';
-                const brandModel = row[2] || '';
-                const value = row[3] || '';
-                const acquireDate = row[4] || '';
-                const lifespan = row[5] || '';
-                const user = row[6] || '';
-                const location = row[7] || '';
-                const note = row[8] || '';
+                const propId = (row[0 + offset] || '').toString().trim();
+                const name = (row[1 + offset] || '').toString().trim();
+                if (!propId && !name) continue; 
                 
-                const statusRaw = row[9] ? row[9].trim() : '';
+                const brandModel = (row[2 + offset] || '').toString().trim();
+                const value = (row[3 + offset] || '').toString().trim();
+                const acquireDate = (row[4 + offset] || '').toString().trim();
+                const lifespan = (row[5 + offset] || '').toString().trim();
+                const user = (row[6 + offset] || '').toString().trim();
+                const location = (row[7 + offset] || '').toString().trim();
+                const note = (row[8 + offset] || '').toString().trim();
+                
+                const statusRaw = row[9 + offset] ? row[9 + offset].toString().trim() : '';
                 const status = statusRaw === '' ? '未盤點' : statusRaw;
 
                 const newRef = doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName));
                 batch.set(newRef, {
                     sessionId: currentSession.id, 
-                    tableId: currentTable.id, // 🟢 綁定至當前表單
+                    tableId: currentTable.id, 
                     tableName: currentTable.name,
                     propId, name, brandModel, value, acquireDate, lifespan, user, location, note, status, 
                     addDate: nowTime, lastUpdatedStr: nowTime, imageUrl: '', 
@@ -576,21 +605,38 @@ export default function App() {
             }
             await batch.commit();
             showToast(`成功匯入 ${successCount} 筆資料至「${currentTable.name}」`);
-        } catch (err) { console.error(err); showToast("匯入失敗", "error"); }
-        if (fileInputRef.current) fileInputRef.current.value = ''; 
+        } catch (err) { 
+            console.error(err); 
+            showToast("匯入失敗，請確認檔案格式", "error"); 
+        } finally {
+            if (fileInputRef.current) fileInputRef.current.value = ''; 
+        }
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   };
 
-  const handleExportCSV = async (sessionToExport = currentSession) => {
+  // 🟢 Excel 匯出功能 (支援匯出「全部」或「特定選取」項目)
+  const handleExportExcel = async (sessionToExport = currentSession, exportSelectedOnly = false) => {
     if (!sessionToExport) return;
+
+    if (!window.XLSX) {
+      showToast("Excel 模組載入中，請稍後再試", "error");
+      return;
+    }
+    const XLSX = window.XLSX;
+
     let exportItems = [];
     if (currentSession && sessionToExport.id === currentSession.id) {
-        // 🟢 若為財產管理，預設匯出「當前選取」的表單資料 (如果有選取)
+        let baseList = itemsList;
         if (!isLab && currentTable) {
-            exportItems = itemsList.filter(i => i.tableId === currentTable.id);
+            baseList = itemsList.filter(i => i.tableId === currentTable.id);
+        }
+        
+        // 🟢 若為特定選取匯出
+        if (exportSelectedOnly && selectedItemIds.length > 0) {
+            exportItems = baseList.filter(i => selectedItemIds.includes(i.id));
         } else {
-            exportItems = itemsList;
+            exportItems = baseList;
         }
     } else {
         try {
@@ -599,6 +645,7 @@ export default function App() {
             exportItems = snapshot.docs.map(d => d.data());
         } catch (e) { showToast("匯出失敗", "error"); return; }
     }
+    
     if (!exportItems.length) { showToast("無資料可匯出", "error"); return; }
     
     let headers = [];
@@ -607,25 +654,29 @@ export default function App() {
         headers = ["設備名稱", "分類", "總數量", "已借出", "剩餘庫存", "加入日期", "備註"];
         rows = exportItems.map(item => {
             const borrowed = item.borrowedCount || 0; const remaining = item.quantity - borrowed;
-            return [`"${(item.name||'').replace(/"/g, '""')}"`, `"${item.categoryName||''}"`, item.quantity, borrowed, remaining, `"${item.addDate||''}"`, `"${(item.note||'').replace(/"/g, '""')}"`].join(",");
+            return [item.name||'', item.categoryName||'', item.quantity, borrowed, remaining, item.addDate||'', item.note||''];
         });
     } else {
-        // 🟢 新增所屬表單名稱至匯出檔
         headers = ["所屬表單", "財產編號", "財產名稱", "廠牌型別", "現值", "取得日期", "使用年限", "使用人", "存置地點", "備註", "盤點狀況"];
         rows = exportItems.map(item => {
-            return [`"${item.tableName||''}"`, `"${item.propId||''}"`, `"${(item.name||'').replace(/"/g, '""')}"`, `"${(item.brandModel||'').replace(/"/g, '""')}"`, `"${item.value||''}"`, `"${item.acquireDate||''}"`, `"${item.lifespan||''}"`, `"${(item.user||'').replace(/"/g, '""')}"`, `"${(item.location||'').replace(/"/g, '""')}"`, `"${(item.note||'').replace(/"/g, '""')}"`, `"${item.status||'未盤點'}"`].join(",");
+            return [item.tableName||'', item.propId||'', item.name||'', item.brandModel||'', item.value||'', item.acquireDate||'', item.lifespan||'', item.user||'', item.location||'', item.note||'', item.status||'未盤點'];
         });
     }
 
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a"); link.href = url; 
-    
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "清單");
+
     const tablePrefix = (!isLab && currentTable && currentSession && sessionToExport.id === currentSession.id) ? `_${currentTable.name}` : '';
-    link.download = `${sessionToExport.name}${tablePrefix}_清單.csv`;
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    showToast("CSV 下載已開始");
+    const selectionPrefix = exportSelectedOnly ? '_選取項目' : '';
+    XLSX.writeFile(workbook, `${sessionToExport.name}${tablePrefix}${selectionPrefix}_清單.xlsx`);
+    
+    // 匯出後自動關閉選取模式
+    if (exportSelectedOnly) {
+        setIsSelectionMode(false);
+        setSelectedItemIds([]);
+    }
+    showToast("Excel 下載已開始");
   };
 
   const deleteSession = (id) => {
@@ -638,13 +689,11 @@ export default function App() {
         try {
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colSessionsName, id));
           
-          // Delete inner items
           const qItems = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', id));
           const snapshot = await getDocs(qItems);
           const batch = writeBatch(db);
           snapshot.forEach(d => batch.delete(d.ref));
           
-          // 🟢 Delete inner tables for property modes
           if (!isLab && colTablesName) {
               const qTables = query(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), where('sessionId', '==', id));
               const tSnapshot = await getDocs(qTables);
@@ -667,7 +716,31 @@ export default function App() {
     });
   };
 
-  // 🟢 表單(Tabs) 儲存與刪除邏輯
+  // 🟢 批次刪除選取項目
+  const handleDeleteSelected = () => {
+    setConfirmDialog({
+        isOpen: true,
+        title: "批次刪除確認",
+        message: `確定要刪除選取的 ${selectedItemIds.length} 筆資料嗎？此操作無法復原！`,
+        isDangerous: true,
+        action: async () => {
+            try {
+                const batch = writeBatch(db);
+                selectedItemIds.forEach(id => {
+                    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', colItemsName, id));
+                });
+                await batch.commit();
+                setConfirmDialog(p => ({...p, isOpen: false}));
+                showToast(`已成功刪除 ${selectedItemIds.length} 筆資料`);
+                setSelectedItemIds([]);
+                setIsSelectionMode(false);
+            } catch(e) {
+                showToast("刪除失敗", "error");
+            }
+        }
+    });
+  };
+
   const handleSaveTable = async (e) => {
     e.preventDefault();
     try {
@@ -740,7 +813,6 @@ export default function App() {
                     countItems++;
                 });
             } else {
-                // 🟢 複製舊的「表單 Tabs」與其中的「財產資料」
                 const qOldTables = query(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), where('sessionId', '==', latestSession.id));
                 const oldTablesSnap = await getDocs(qOldTables);
                 const tableIdMap = {};
@@ -789,7 +861,6 @@ export default function App() {
         const cat = categories.find(c => c.id === equipForm.categoryId);
         payload = { ...payload, name: equipForm.name, quantity: parseInt(equipForm.quantity), categoryId: equipForm.categoryId, categoryName: cat ? cat.name : '未分類', note: equipForm.note, addDate: equipForm.addDate || '', ...(editItem ? {} : { borrowedCount: 0 }) };
       } else {
-        // 🟢 財產必須綁定所屬的表單 ID
         payload = { ...payload, ...propForm, tableId: currentTable.id, tableName: currentTable.name, imageUrl: imagePreview || '', ...(editItem ? {} : { createdAt: serverTimestamp() }) };
       }
 
@@ -814,13 +885,12 @@ export default function App() {
 
   // --- Filtering & Sorting ---
   const filteredItems = useMemo(() => {
-    // 🟢 先根據當前選擇的表單過濾
     let baseList = itemsList;
     if (!isLab) {
         if (currentTable) {
             baseList = itemsList.filter(i => i.tableId === currentTable.id);
         } else {
-            baseList = []; // 若尚未選取任何表單，不顯示財產
+            baseList = []; 
         }
     }
 
@@ -853,14 +923,24 @@ export default function App() {
   const totalLoanPages = Math.ceil(loans.length / ITEMS_PER_PAGE);
   const paginatedLoans = useMemo(() => { const startIndex = (currentLoanPage - 1) * ITEMS_PER_PAGE; return loans.slice(startIndex, startIndex + ITEMS_PER_PAGE); }, [loans, currentLoanPage]);
 
-  // --- Modal Openers ---
+  // 🟢 多重選取輔助函式
+  const toggleSelection = (id) => {
+      setSelectedItemIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+  const handleSelectAll = (e) => {
+      if (e.target.checked) {
+          setSelectedItemIds(filteredItems.map(i => i.id));
+      } else {
+          setSelectedItemIds([]);
+      }
+  };
+
   const openSessionModal = (item=null) => { 
       setModalType('session'); setEditItem(item); 
       setSessionForm({ name: item ? item.name : '', date: item ? item.date : new Date().toISOString().slice(0,10), year: item ? item.year||'' : new Date().getFullYear()-1911, stage: item ? item.stage||'初盤' : '初盤', copyFromPrevious: false }); 
       setIsModalOpen(true); 
   };
   
-  // 🟢 打開新增/編輯表單
   const openTableModal = (item=null) => {
       setModalType('table'); setEditItem(item);
       setTableForm({ name: item ? item.name : '' });
@@ -879,7 +959,6 @@ export default function App() {
       setIsModalOpen(true); 
   };
 
-  // --- Cart Helpers (Lab Only) ---
   const initiateAddToCart = (item) => { const avail = getAvailability(item); if(avail<=0){showToast("已無庫存","error");return;} setSelectQuantityDialog({ isOpen: true, item }); };
   const confirmAddToCart = (item, qty) => {
     const existing = cartItems.find(c => c.id === item.id); const avail = getAvailability(item);
@@ -984,20 +1063,42 @@ export default function App() {
                 </div>
              </div>
           </div>
+          
+          {/* 🟢 Header Actions - 增加多重選取按鈕與批次操作 */}
           <div className="flex gap-2 flex-shrink-0">
             {viewMode === 'items' && (
+              isSelectionMode ? (
+                <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
+                  <span className="text-sm font-bold text-slate-500 mr-2 hidden md:inline">已選取: {selectedItemIds.length}</span>
+                  <button onClick={() => handleExportExcel(currentSession, true)} disabled={selectedItemIds.length === 0} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯出選定</span>
+                  </button>
+                  <button onClick={handleDeleteSelected} disabled={selectedItemIds.length === 0} className="bg-white border border-slate-200 text-rose-600 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-rose-50 shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <Trash2 className="w-4 h-4"/> <span className="hidden sm:inline font-bold">刪除選定</span>
+                  </button>
+                  <button onClick={() => { setIsSelectionMode(false); setSelectedItemIds([]); }} className="bg-slate-100 border border-slate-200 text-slate-600 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-200 shadow-sm transition-all active:scale-95">
+                    <X className="w-4 h-4"/> <span className="hidden sm:inline font-bold">取消</span>
+                  </button>
+                </div>
+              ) : (
                 <>
-                <button onClick={()=>handleExportCSV()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95"><FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯出 CSV</span></button>
+                <button onClick={() => setIsSelectionMode(true)} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95">
+                  <ListChecks className={`w-4 h-4 ${SysConfig.textClass}`}/> <span className="hidden sm:inline font-bold">選取</span>
+                </button>
+                <button onClick={()=>handleExportExcel()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95">
+                  <FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯出 Excel</span>
+                </button>
                 {!isLab && currentTable && (
                   <>
-                  <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleImportCSV} />
-                  <button onClick={()=>fileInputRef.current?.click()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯入 CSV</span></button>
+                  <input type="file" accept=".xlsx, .xls" ref={fileInputRef} className="hidden" onChange={handleImportExcel} />
+                  <button onClick={()=>fileInputRef.current?.click()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯入 Excel</span></button>
                   </>
                 )}
                 {(isLab || currentTable) && (
                   <button onClick={()=>openItemModal()} className={`text-white px-3 py-2 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>
                 )}
                 </>
+              )
             )}
             {viewMode === 'sessions' && <button onClick={()=>openSessionModal()} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增清單</button>}
             {viewMode === 'categories' && <button onClick={()=>{setModalType('category');setEditItem(null);setCatForm({name:''});setIsModalOpen(true)}} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增分類</button>}
@@ -1055,7 +1156,7 @@ export default function App() {
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center mt-6">
                      <div className="mx-auto w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mb-4"><CheckSquare className="w-8 h-8"/></div>
                      <h3 className="text-xl font-bold text-slate-700 mb-2">開始盤點作業</h3>
-                     <p className="text-slate-500 mb-6 max-w-md mx-auto">請前往「清單總覽」選擇您要進行盤點的年度與階段。您可以隨時匯入學校提供的 Excel 清單，或是將盤點結果匯出為 CSV 檔案以利歸檔。</p>
+                     <p className="text-slate-500 mb-6 max-w-md mx-auto">請前往「清單總覽」選擇您要進行盤點的年度與階段。您可以隨時匯入學校提供的 Excel 清單，或是將盤點結果匯出為 Excel 檔案以利歸檔。</p>
                      <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); }} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>前往盤點清單總覽</button>
                   </div>
                 )}
@@ -1078,7 +1179,7 @@ export default function App() {
                   <div className="bg-slate-50 px-6 py-3 border-t border-slate-100 flex justify-between items-center">
                     <span className="text-[10px] text-slate-400 font-mono tracking-wider">ID: {sess.id.slice(0,8)}</span>
                     <div className="flex gap-1">
-                      <button onClick={(e)=>{e.stopPropagation(); handleExportCSV(sess);}} className={`p-2 rounded-lg text-slate-400 hover:bg-slate-200 ${SysConfig.textClass.replace('text-','hover:text-')} transition-colors`} title="匯出 CSV"><FileDown className="w-4 h-4"/></button>
+                      <button onClick={(e)=>{e.stopPropagation(); handleExportExcel(sess);}} className={`p-2 rounded-lg text-slate-400 hover:bg-slate-200 ${SysConfig.textClass.replace('text-','hover:text-')} transition-colors`} title="匯出 Excel"><FileDown className="w-4 h-4"/></button>
                       <button onClick={(e)=>{e.stopPropagation();openSessionModal(sess)}} className={`p-2 rounded-lg text-slate-400 hover:bg-slate-200 ${SysConfig.textClass.replace('text-','hover:text-')} transition-colors`}><Edit2 className="w-4 h-4"/></button>
                       <button onClick={(e)=>{e.stopPropagation();deleteSession(sess.id)}} className="p-2 rounded-lg text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition-colors"><Trash2 className="w-4 h-4"/></button>
                     </div>
@@ -1093,7 +1194,7 @@ export default function App() {
           {viewMode === 'items' && currentSession && (
             <div className="space-y-4 animate-in fade-in duration-300 max-w-7xl mx-auto">
               
-              {/* 🟢 新增：表單 (Tabs) 選擇列 */}
+              {/* Tabs for Property Modes */}
               {!isLab && (
                 <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar py-1">
                   {tables.map(t => (
@@ -1117,7 +1218,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* 🟢 若無表單則顯示空狀態 */}
               {!isLab && tables.length === 0 ? (
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-12 text-center mt-6">
                     <div className="mx-auto w-16 h-16 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center mb-4"><FileSpreadsheet className="w-8 h-8"/></div>
@@ -1200,16 +1300,33 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Mobile Card View (Paginated) */}
+                  {/* 🟢 Mobile Card View (Paginated with Selection) */}
                   <div className="block md:hidden">
                     <div className="space-y-4">
                       {paginatedItems.map(item => {
                         const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
+                        const isSelected = selectedItemIds.includes(item.id);
                         return (
-                          <div key={item.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex gap-3 relative">
+                          <div 
+                            key={item.id} 
+                            onClick={() => isSelectionMode && toggleSelection(item.id)}
+                            className={`bg-white rounded-xl shadow-sm border p-4 flex gap-3 relative transition-all ${isSelectionMode ? 'cursor-pointer hover:shadow-md' : ''} ${isSelectionMode && isSelected ? `border-${themeColor}-400 ring-1 ring-${themeColor}-400 bg-${themeColor}-50/30` : 'border-slate-200'}`}
+                          >
+                            {/* Checkbox for Selection Mode */}
+                            {isSelectionMode && (
+                              <div className="flex items-center justify-center pr-1" onClick={e => e.stopPropagation()}>
+                                <input 
+                                  type="checkbox" 
+                                  checked={isSelected} 
+                                  onChange={() => toggleSelection(item.id)} 
+                                  className="w-5 h-5 cursor-pointer accent-indigo-600 rounded" 
+                                />
+                              </div>
+                            )}
+
                             {item.imageUrl ? (
                                <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100">
-                                 <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={() => setFullScreenImage(item.imageUrl)} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
+                                 <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={(e) => { if(!isSelectionMode) { e.stopPropagation(); setFullScreenImage(item.imageUrl); } }} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
                                </div>
                             ) : (
                                <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
@@ -1225,7 +1342,6 @@ export default function App() {
                                 </div>
                               </div>
                               
-                              {/* 🟢 財產詳細資料展示 (手機版) */}
                               {!isLab && (
                                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-2 mb-2 text-[10px] text-slate-600 bg-slate-50 p-2 rounded-lg">
                                     <div className="truncate"><span className="text-slate-400">廠牌:</span> {item.brandModel || '-'}</div>
@@ -1236,7 +1352,6 @@ export default function App() {
                                  </div>
                               )}
 
-                              {/* Tags & Meta */}
                               <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                                 {isLab ? (
                                     <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.categoryName}</span>
@@ -1250,35 +1365,37 @@ export default function App() {
                               </div>
                               {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5"/> 更新: {item.lastUpdatedStr}</div>}
                               
-                              {/* Bottom Action Area */}
-                              <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between gap-2">
-                                {isLab ? (
-                                    <>
-                                    <div className="flex gap-2 text-xs text-slate-600 font-mono">
-                                        <span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                                        <div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
-                                          <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
-                                          <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
-                                        </div>
-                                        <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}>
-                                          <Plus className="w-3 h-3"/> 借用
-                                        </button>
-                                    </div>
-                                    </>
-                                ) : (
-                                    <>
-                                    <button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
-                                        {item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}
-                                    </button>
-                                    <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
-                                      <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
-                                      <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
-                                    </div>
-                                    </>
-                                )}
-                              </div>
+                              {/* Bottom Action Area (Hidden if Selection Mode) */}
+                              {!isSelectionMode && (
+                                <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between gap-2">
+                                  {isLab ? (
+                                      <>
+                                      <div className="flex gap-2 text-xs text-slate-600 font-mono">
+                                          <span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                                          <div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                                            <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
+                                            <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
+                                          </div>
+                                          <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}>
+                                            <Plus className="w-3 h-3"/> 借用
+                                          </button>
+                                      </div>
+                                      </>
+                                  ) : (
+                                      <>
+                                      <button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                                          {item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}
+                                      </button>
+                                      <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                                        <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
+                                        <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
+                                      </div>
+                                      </>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
@@ -1288,12 +1405,24 @@ export default function App() {
                     <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                   </div>
 
-                  {/* Desktop Table View (Paginated) */}
+                  {/* 🟢 Desktop Table View (Paginated with Selection) */}
                   <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 sticky top-0 z-10 shadow-sm">
                             <tr>
+                            {/* Master Checkbox Header */}
+                            {isSelectionMode && (
+                              <th className="p-3 w-12 text-center align-middle">
+                                <input 
+                                  type="checkbox" 
+                                  className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" 
+                                  checked={filteredItems.length > 0 && selectedItemIds.length === filteredItems.length} 
+                                  onChange={handleSelectAll} 
+                                  title="全選目前篩選資料"
+                                />
+                              </th>
+                            )}
                             <th className="p-3 w-14 text-center">圖</th>
                             {isLab ? (
                                 <>
@@ -1317,11 +1446,28 @@ export default function App() {
                         <tbody className="divide-y divide-slate-100">
                             {paginatedItems.map(item => {
                             const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
+                            const isSelected = selectedItemIds.includes(item.id);
                             return (
-                                <tr key={item.id} className="hover:bg-slate-50/50 transition-colors group">
+                                <tr 
+                                  key={item.id} 
+                                  onClick={() => isSelectionMode && toggleSelection(item.id)}
+                                  className={`transition-colors group ${isSelectionMode ? 'cursor-pointer' : ''} ${isSelected ? `bg-${themeColor}-50/60` : 'hover:bg-slate-50/50'}`}
+                                >
+                                {/* Individual Checkbox */}
+                                {isSelectionMode && (
+                                  <td className="p-3 text-center align-middle" onClick={e => e.stopPropagation()}>
+                                    <input 
+                                      type="checkbox" 
+                                      className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" 
+                                      checked={isSelected} 
+                                      onChange={() => toggleSelection(item.id)} 
+                                    />
+                                  </td>
+                                )}
+
                                 <td className="p-3 text-center align-top pt-4">
                                     {item.imageUrl ? (
-                                        <div onClick={() => setFullScreenImage(item.imageUrl)} className="inline-block w-10 h-10 rounded-lg overflow-hidden border border-slate-200 hover:scale-150 transition-transform origin-left shadow-sm cursor-pointer">
+                                        <div onClick={(e) => { if(!isSelectionMode) { e.stopPropagation(); setFullScreenImage(item.imageUrl); } }} className={`inline-block w-10 h-10 rounded-lg overflow-hidden border border-slate-200 shadow-sm ${!isSelectionMode ? 'hover:scale-150 transition-transform origin-left cursor-pointer' : ''}`}>
                                             <img src={item.imageUrl} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
                                         </div>
                                     ) : (
@@ -1350,13 +1496,15 @@ export default function App() {
                                         </div>
                                     </td>
                                     <td className="p-3 text-right align-top">
-                                        <div className="flex justify-end gap-1.5">
-                                        <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : SysConfig.colorClass}`}>
-                                            <Plus className="w-3.5 h-3.5"/> 借用
-                                        </button>
-                                        <button onClick={()=>openItemModal(item)} className="p-1.5 text-slate-400 hover:text-teal-600 bg-transparent hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4"/></button>
-                                        <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
-                                        </div>
+                                        {!isSelectionMode && (
+                                            <div className="flex justify-end gap-1.5">
+                                            <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : SysConfig.colorClass}`}>
+                                                <Plus className="w-3.5 h-3.5"/> 借用
+                                            </button>
+                                            <button onClick={()=>openItemModal(item)} className="p-1.5 text-slate-400 hover:text-teal-600 bg-transparent hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4"/></button>
+                                            <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
+                                            </div>
+                                        )}
                                     </td>
                                     </>
                                 ) : (
@@ -1379,22 +1527,30 @@ export default function App() {
                                         <div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
                                     </td>
                                     <td className="p-3 align-top text-center">
-                                        <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">
-                                            {item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}
-                                        </button>
+                                        {!isSelectionMode ? (
+                                            <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">
+                                                {item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}
+                                            </button>
+                                        ) : (
+                                            <span className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                                                {item.status}
+                                            </span>
+                                        )}
                                     </td>
                                     <td className="p-3 text-right align-top">
-                                        <div className="flex justify-end gap-1">
-                                        <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button>
-                                        <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
-                                        </div>
+                                        {!isSelectionMode && (
+                                            <div className="flex justify-end gap-1">
+                                            <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button>
+                                            <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
+                                            </div>
+                                        )}
                                     </td>
                                     </>
                                 )}
                                 </tr>
                             );
                             })}
-                            {filteredItems.length === 0 && <tr><td colSpan="6" className="p-12 text-center text-slate-400">沒有找到相符資料</td></tr>}
+                            {filteredItems.length === 0 && <tr><td colSpan={isSelectionMode ? 7 : 6} className="p-12 text-center text-slate-400">沒有找到相符資料</td></tr>}
                         </tbody>
                         </table>
                     </div>
