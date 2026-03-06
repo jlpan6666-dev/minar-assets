@@ -80,7 +80,7 @@ const compressImage = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const maxWidth = 600; // 稍微調降解析度，避免超過 Firestore 1MB 單筆文件限制
+        const maxWidth = 600; 
         let width = img.width;
         let height = img.height;
 
@@ -94,7 +94,7 @@ const compressImage = (file) => {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.5); // 壓縮品質調整為 0.5
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.5); 
         resolve(dataUrl);
       };
       img.onerror = (error) => reject(error);
@@ -129,7 +129,6 @@ const parseCSV = (text) => {
   return result;
 };
 
-// --- 🔵 備用圖示 Base64 (防止破圖) ---
 const FALLBACK_IMAGE_SRC = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM5NDBhMWEiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIzIiB5PSIzIiB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHJ4PSIyIiByeT0iMiI+PC9yZWN0PjxjaXJjbGUgY3g9IjguNSIgY3k9IjguNSIgcj0iMS41Ij48L2NpcmNsZT48cG9seWxpbmUgcG9pbnRzPSIyMSAxNSAxNiAxMCA1IDIxIj48L3BvbHlsaW5lPjwvc3ZnPg==';
 
 // --- 元件：自定義確認視窗 ---
@@ -281,7 +280,6 @@ const AuthScreen = ({ setAppMode }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
-      {/* Background decoration */}
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-200/30 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -343,9 +341,12 @@ export default function App() {
 
   // Data State
   const [sessions, setSessions] = useState([]);
-  const [itemsList, setItemsList] = useState([]); // 通用 List (設備 或 財產)
+  const [tables, setTables] = useState([]); // 🟢 新增：表單 (Tabs) 資料
+  const [currentTable, setCurrentTable] = useState(null); // 🟢 新增：目前選取的表單
+
+  const [itemsList, setItemsList] = useState([]); 
   const [categories, setCategories] = useState([]);
-  const [loans, setLoans] = useState([]); // Lab only
+  const [loans, setLoans] = useState([]); 
   
   // Dashboard Stats
   const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, groupedActivity: [] });
@@ -353,8 +354,8 @@ export default function App() {
   // UI State
   const [searchTerm, setSearchTerm] = useState('');
   const [searchDate, setSearchDate] = useState(''); 
-  const [searchStatus, setSearchStatus] = useState('all'); // Property Only
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all'); // Lab Only
+  const [searchStatus, setSearchStatus] = useState('all'); 
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all'); 
   const [sortOption, setSortOption] = useState('created_desc'); 
   
   // Pagination State
@@ -374,21 +375,23 @@ export default function App() {
   
   // Forms State
   const [sessionForm, setSessionForm] = useState({ name: '', date: '', year: '', stage: '初盤', copyFromPrevious: false });
+  const [tableForm, setTableForm] = useState({ name: '' }); // 🟢 新增：表單新增/修改 Form
   const [equipForm, setEquipForm] = useState({ name: '', quantity: 1, categoryId: '', note: '', imageUrl: '', addDate: '' });
   const [propForm, setPropForm] = useState({ propId: '', name: '', brandModel: '', value: '', acquireDate: '', lifespan: '', user: '', location: '', note: '', status: '未盤點', imageUrl: '' });
   
   const [imagePreview, setImagePreview] = useState(''); 
   const [isCompressing, setIsCompressing] = useState(false);
-  const fileInputRef = useRef(null); // For CSV Import
+  const fileInputRef = useRef(null); 
   
   const [catForm, setCatForm] = useState({ name: '' });
   const [cartItems, setCartItems] = useState([]);
   const [borrowForm, setBorrowForm] = useState({ borrower: '', phone: '', date: new Date().toISOString().slice(0,10), purpose: '', borrowDays: 7 });
   const [mobileBorrowTab, setMobileBorrowTab] = useState('equipment');
-  const [fullScreenImage, setFullScreenImage] = useState(null); // 🟢 全螢幕圖片預覽狀態
+  const [fullScreenImage, setFullScreenImage] = useState(null); 
 
   // DB Path Helpers
   const colSessionsName = appMode === 'lab' ? 'sessions' : `sessions_${appMode}`;
+  const colTablesName = appMode === 'lab' ? null : `tables_${appMode}`; // 🟢 只有財產管理需要多表單
   const colItemsName = appMode === 'lab' ? 'equipment' : `items_${appMode}`;
   const isLab = appMode === 'lab';
   const themeColor = isLab ? 'teal' : appMode === 'property_jl' ? 'blue' : 'indigo';
@@ -400,26 +403,44 @@ export default function App() {
   useEffect(() => {
     setViewMode('dashboard');
     setCurrentSession(null);
+    setCurrentTable(null);
     setSearchTerm(''); setSearchDate(''); setSearchStatus('all'); setSelectedCategoryFilter('all');
   }, [appMode]);
 
   // Reset Pagination when Filters Change
-  useEffect(() => { setCurrentPage(1); setCurrentLoanPage(1); }, [searchTerm, searchDate, searchStatus, selectedCategoryFilter, sortOption, viewMode, currentSession]);
+  useEffect(() => { setCurrentPage(1); setCurrentLoanPage(1); }, [searchTerm, searchDate, searchStatus, selectedCategoryFilter, sortOption, viewMode, currentSession, currentTable]);
 
-  // Global Listeners
+  // Global Listeners (Categories & Sessions)
   useEffect(() => {
     if (!user || !appMode) return;
-    
-    // Categories (Lab only)
     let unsubCat = () => {};
     if (isLab) unsubCat = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), snap => setCategories(snap.docs.map(d => ({id: d.id, ...d.data()}))));
-    
-    // Sessions
     const qSession = query(collection(db, 'artifacts', appId, 'public', 'data', colSessionsName), orderBy('date', 'desc'));
     const unsubSess = onSnapshot(qSession, snap => setSessions(snap.docs.map(d => ({id: d.id, ...d.data()}))));
-    
     return () => { unsubCat(); unsubSess(); };
   }, [user, appMode, isLab, colSessionsName]);
+
+  // 🟢 監聽當前清單底下的「表單 (Tables)」資料 (Only for Property Modes)
+  useEffect(() => {
+    if (!user || !currentSession || isLab || !colTablesName) {
+        setTables([]);
+        setCurrentTable(null);
+        return;
+    }
+    const qTables = query(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), where('sessionId', '==', currentSession.id), orderBy('createdAt', 'asc'));
+    const unsubTables = onSnapshot(qTables, snap => {
+        const fetchedTables = snap.docs.map(d => ({id: d.id, ...d.data()}));
+        setTables(fetchedTables);
+        
+        // Auto-select table if not selected or current one was deleted
+        setCurrentTable(prev => {
+            if (!prev && fetchedTables.length > 0) return fetchedTables[0];
+            if (prev && !fetchedTables.find(t => t.id === prev.id)) return fetchedTables.length > 0 ? fetchedTables[0] : null;
+            return prev;
+        });
+    });
+    return () => unsubTables();
+  }, [user, currentSession, isLab, colTablesName]);
 
   // Dashboard Logic
   useEffect(() => {
@@ -434,8 +455,7 @@ export default function App() {
     const qItems = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', targetSessionId));
     const unsubItems = onSnapshot(qItems, (snap) => {
       let total = snap.size; 
-      let countA = 0, countB = 0; // Lab: Borrowed, LowStock. Prop: Inventoried, Uninventoried
-      
+      let countA = 0, countB = 0; 
       snap.forEach(doc => {
         const data = doc.data();
         if (isLab) {
@@ -474,7 +494,7 @@ export default function App() {
     return () => { unsubItems(); unsubLoans(); };
   }, [user, appMode, viewMode, sessions, isLab, colItemsName]); 
 
-  // Session Data
+  // Session Data Items Listeners
   useEffect(() => {
     if (!user || !currentSession || !appMode) return;
     const qItems = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', currentSession.id));
@@ -493,11 +513,7 @@ export default function App() {
   }, [user, appMode, currentSession, isLab, colItemsName]);
 
   const showToast = (msg, type='success') => setToast({message: msg, type});
-  
-  // Handlers
   const handleLogout = async () => { try { await signOut(auth); localStorage.removeItem('appMode'); setAppMode(null); } catch(e){} };
-
-  // UI/Action Helpers
   const getAvailability = (item) => isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
   
   const handleImageChange = async (e) => {
@@ -511,7 +527,8 @@ export default function App() {
   // CSV Import for Property
   const handleImportCSV = async (e) => {
     const file = e.target.files[0];
-    if (!file || !currentSession || isLab) return;
+    // 🟢 如果沒有選擇表單，阻擋匯入
+    if (!file || !currentSession || isLab || !currentTable) return;
     
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -526,7 +543,7 @@ export default function App() {
 
             for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
-                if (row.length < 2) continue; // skip empty rows
+                if (row.length < 2) continue; 
                 
                 const propId = row[0] || '';
                 const name = row[1] || '';
@@ -538,20 +555,24 @@ export default function App() {
                 const location = row[7] || '';
                 const note = row[8] || '';
                 
-                // 🟢 檢查盤點狀況若為空白則設為未盤點
                 const statusRaw = row[9] ? row[9].trim() : '';
                 const status = statusRaw === '' ? '未盤點' : statusRaw;
 
                 const newRef = doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName));
                 batch.set(newRef, {
-                    sessionId: currentSession.id, propId, name, brandModel, value, acquireDate, lifespan, user, location, note, status, addDate: nowTime, lastUpdatedStr: nowTime, imageUrl: '', createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+                    sessionId: currentSession.id, 
+                    tableId: currentTable.id, // 🟢 綁定至當前表單
+                    tableName: currentTable.name,
+                    propId, name, brandModel, value, acquireDate, lifespan, user, location, note, status, 
+                    addDate: nowTime, lastUpdatedStr: nowTime, imageUrl: '', 
+                    createdAt: serverTimestamp(), updatedAt: serverTimestamp()
                 });
                 successCount++;
             }
             await batch.commit();
-            showToast(`成功匯入 ${successCount} 筆資料`);
+            showToast(`成功匯入 ${successCount} 筆資料至「${currentTable.name}」`);
         } catch (err) { console.error(err); showToast("匯入失敗", "error"); }
-        if (fileInputRef.current) fileInputRef.current.value = ''; // reset input
+        if (fileInputRef.current) fileInputRef.current.value = ''; 
     };
     reader.readAsText(file);
   };
@@ -559,8 +580,14 @@ export default function App() {
   const handleExportCSV = async (sessionToExport = currentSession) => {
     if (!sessionToExport) return;
     let exportItems = [];
-    if (currentSession && sessionToExport.id === currentSession.id) exportItems = itemsList;
-    else {
+    if (currentSession && sessionToExport.id === currentSession.id) {
+        // 🟢 若為財產管理，預設匯出「當前選取」的表單資料 (如果有選取)
+        if (!isLab && currentTable) {
+            exportItems = itemsList.filter(i => i.tableId === currentTable.id);
+        } else {
+            exportItems = itemsList;
+        }
+    } else {
         try {
             const q = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', sessionToExport.id));
             const snapshot = await getDocs(q);
@@ -578,45 +605,51 @@ export default function App() {
             return [`"${(item.name||'').replace(/"/g, '""')}"`, `"${item.categoryName||''}"`, item.quantity, borrowed, remaining, `"${item.addDate||''}"`, `"${(item.note||'').replace(/"/g, '""')}"`].join(",");
         });
     } else {
-        // 🟢 修改匯出的 CSV 標題為「盤點狀況」
-        headers = ["財產編號", "財產名稱", "廠牌型別", "現值", "取得日期", "使用年限", "使用人", "存置地點", "備註", "盤點狀況"];
+        // 🟢 新增所屬表單名稱至匯出檔
+        headers = ["所屬表單", "財產編號", "財產名稱", "廠牌型別", "現值", "取得日期", "使用年限", "使用人", "存置地點", "備註", "盤點狀況"];
         rows = exportItems.map(item => {
-            return [`"${item.propId||''}"`, `"${(item.name||'').replace(/"/g, '""')}"`, `"${(item.brandModel||'').replace(/"/g, '""')}"`, `"${item.value||''}"`, `"${item.acquireDate||''}"`, `"${item.lifespan||''}"`, `"${(item.user||'').replace(/"/g, '""')}"`, `"${(item.location||'').replace(/"/g, '""')}"`, `"${(item.note||'').replace(/"/g, '""')}"`, `"${item.status||'未盤點'}"`].join(",");
+            return [`"${item.tableName||''}"`, `"${item.propId||''}"`, `"${(item.name||'').replace(/"/g, '""')}"`, `"${(item.brandModel||'').replace(/"/g, '""')}"`, `"${item.value||''}"`, `"${item.acquireDate||''}"`, `"${item.lifespan||''}"`, `"${(item.user||'').replace(/"/g, '""')}"`, `"${(item.location||'').replace(/"/g, '""')}"`, `"${(item.note||'').replace(/"/g, '""')}"`, `"${item.status||'未盤點'}"`].join(",");
         });
     }
 
     const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a"); link.href = url; link.download = `${sessionToExport.name}_清單.csv`;
+    const link = document.createElement("a"); link.href = url; 
+    
+    const tablePrefix = (!isLab && currentTable && currentSession && sessionToExport.id === currentSession.id) ? `_${currentTable.name}` : '';
+    link.download = `${sessionToExport.name}${tablePrefix}_清單.csv`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
     showToast("CSV 下載已開始");
   };
 
-  // 🟢 強化刪除清單機制：連同附屬的設備/財產資料一起刪除
   const deleteSession = (id) => {
     setConfirmDialog({
       isOpen: true,
       title: "刪除清單",
-      message: "確定要刪除此清單嗎？（其內含的所有資料也會一併刪除）",
+      message: "確定要刪除此清單嗎？（其內含的表單與財產資料也會一併刪除）",
       isDangerous: true,
       action: async () => {
         try {
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colSessionsName, id));
           
-          // 串聯刪除該清單下的所有項目，避免成為無主資料
+          // Delete inner items
           const qItems = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', id));
           const snapshot = await getDocs(qItems);
           const batch = writeBatch(db);
-          snapshot.forEach(d => {
-            batch.delete(d.ref);
-          });
+          snapshot.forEach(d => batch.delete(d.ref));
+          
+          // 🟢 Delete inner tables for property modes
+          if (!isLab && colTablesName) {
+              const qTables = query(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), where('sessionId', '==', id));
+              const tSnapshot = await getDocs(qTables);
+              tSnapshot.forEach(d => batch.delete(d.ref));
+          }
           await batch.commit();
 
           setConfirmDialog(p => ({ ...p, isOpen: false }));
           showToast("清單已徹底刪除");
           
-          // 如果刪除的是當前正在檢視的清單，則跳回總覽
           if (currentSession && currentSession.id === id) {
             setCurrentSession(null);
             setViewMode('sessions');
@@ -629,33 +662,107 @@ export default function App() {
     });
   };
 
+  // 🟢 表單(Tabs) 儲存與刪除邏輯
+  const handleSaveTable = async (e) => {
+    e.preventDefault();
+    try {
+        if (editItem) { 
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', colTablesName, editItem.id), { name: tableForm.name, updatedAt: serverTimestamp() });
+            showToast("表單已更新");
+        } else {
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), {
+                sessionId: currentSession.id,
+                name: tableForm.name,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+            });
+            showToast("表單已建立");
+        }
+        setIsModalOpen(false);
+    } catch (e) { showToast("錯誤", "error"); }
+  };
+
+  const deleteTable = (id) => {
+    setConfirmDialog({
+        isOpen: true,
+        title: "刪除表單",
+        message: "確定要刪除此表單嗎？此表單內的「所有財產資料」將被一併刪除！",
+        isDangerous: true,
+        action: async () => {
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colTablesName, id));
+                const qItems = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('tableId', '==', id));
+                const snapshot = await getDocs(qItems);
+                const batch = writeBatch(db);
+                snapshot.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+                
+                if (currentTable && currentTable.id === id) setCurrentTable(null);
+                setConfirmDialog(p => ({...p, isOpen: false}));
+                showToast("表單及內部資料已刪除");
+            } catch(e) {
+                showToast("刪除失敗", "error");
+            }
+        }
+    });
+  };
+
   const handleSaveSession = async (e) => {
     e.preventDefault();
     try {
       const sName = isLab ? sessionForm.name : `${sessionForm.year}年度-${sessionForm.stage}`;
       const basePayload = { name: sName, date: sessionForm.date, createdBy: user.uid, ...(isLab ? {} : { year: sessionForm.year, stage: sessionForm.stage }) };
       let newSessionRef;
+      
       if (editItem) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', colSessionsName, editItem.id), { ...basePayload, updatedAt: serverTimestamp() });
         showToast("已更新");
       } else {
         newSessionRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', colSessionsName), { ...basePayload, createdAt: serverTimestamp() });
+        
         if (sessionForm.copyFromPrevious && sessions.length > 0) {
-              const latestSession = sessions[0];
-              const qSource = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', latestSession.id));
-              const sourceDocs = await getDocs(qSource);
-              const batch = writeBatch(db);
-              let count = 0;
-              sourceDocs.forEach(docSnap => {
-                  const data = docSnap.data();
-                  const newRef = doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName));
-                  const resetFields = isLab ? { borrowedCount: 0 } : { status: '未盤點' };
-                  batch.set(newRef, { ...data, sessionId: newSessionRef.id, ...resetFields, updatedAt: serverTimestamp(), createdAt: serverTimestamp() });
-                  count++;
-              });
-              if (count > 0) await batch.commit();
-              showToast(`已建立並複製 ${count} 項資料`);
-        } else showToast("建立成功");
+            const latestSession = sessions[0];
+            const batch = writeBatch(db);
+            let countItems = 0;
+
+            if (isLab) {
+                const qSource = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', latestSession.id));
+                const sourceDocs = await getDocs(qSource);
+                sourceDocs.forEach(docSnap => {
+                    const data = docSnap.data();
+                    const newRef = doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName));
+                    batch.set(newRef, { ...data, sessionId: newSessionRef.id, borrowedCount: 0, updatedAt: serverTimestamp(), createdAt: serverTimestamp() });
+                    countItems++;
+                });
+            } else {
+                // 🟢 複製舊的「表單 Tabs」與其中的「財產資料」
+                const qOldTables = query(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), where('sessionId', '==', latestSession.id));
+                const oldTablesSnap = await getDocs(qOldTables);
+                const tableIdMap = {};
+                
+                oldTablesSnap.forEach(tDoc => {
+                    const tData = tDoc.data();
+                    const newTableRef = doc(collection(db, 'artifacts', appId, 'public', 'data', colTablesName));
+                    tableIdMap[tDoc.id] = newTableRef.id;
+                    batch.set(newTableRef, { ...tData, sessionId: newSessionRef.id, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                });
+
+                const qSource = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', latestSession.id));
+                const sourceDocs = await getDocs(qSource);
+                sourceDocs.forEach(docSnap => {
+                    const data = docSnap.data();
+                    const newRef = doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName));
+                    const newTableId = tableIdMap[data.tableId] || data.tableId; 
+                    batch.set(newRef, { ...data, sessionId: newSessionRef.id, tableId: newTableId, status: '未盤點', updatedAt: serverTimestamp(), createdAt: serverTimestamp() });
+                    countItems++;
+                });
+            }
+
+            if (countItems > 0 || !isLab) await batch.commit();
+            showToast(`已建立並複製 ${countItems} 項資料`);
+        } else {
+            showToast("建立成功");
+        }
       }
       setIsModalOpen(false);
     } catch (err) { showToast("錯誤", "error"); }
@@ -664,6 +771,7 @@ export default function App() {
   const handleSaveItem = async (e) => {
     e.preventDefault();
     if (!currentSession) return;
+    if (!isLab && !currentTable) { showToast("請先建立並選擇表單", "error"); return; }
     if (isCompressing) { showToast("圖片正在處理中...", "error"); return; }
 
     const now = new Date();
@@ -676,7 +784,8 @@ export default function App() {
         const cat = categories.find(c => c.id === equipForm.categoryId);
         payload = { ...payload, name: equipForm.name, quantity: parseInt(equipForm.quantity), categoryId: equipForm.categoryId, categoryName: cat ? cat.name : '未分類', note: equipForm.note, addDate: equipForm.addDate || '', ...(editItem ? {} : { borrowedCount: 0 }) };
       } else {
-        payload = { ...payload, ...propForm, imageUrl: imagePreview || '', ...(editItem ? {} : { createdAt: serverTimestamp() }) };
+        // 🟢 財產必須綁定所屬的表單 ID
+        payload = { ...payload, ...propForm, tableId: currentTable.id, tableName: currentTable.name, imageUrl: imagePreview || '', ...(editItem ? {} : { createdAt: serverTimestamp() }) };
       }
 
       if (editItem) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', colItemsName, editItem.id), payload);
@@ -700,7 +809,17 @@ export default function App() {
 
   // --- Filtering & Sorting ---
   const filteredItems = useMemo(() => {
-    const result = itemsList.filter(item => {
+    // 🟢 先根據當前選擇的表單過濾
+    let baseList = itemsList;
+    if (!isLab) {
+        if (currentTable) {
+            baseList = itemsList.filter(i => i.tableId === currentTable.id);
+        } else {
+            baseList = []; // 若尚未選取任何表單，不顯示財產
+        }
+    }
+
+    const result = baseList.filter(item => {
       const matchSearch = isLab 
         ? item.name.toLowerCase().includes(searchTerm.toLowerCase())
         : (item.name.toLowerCase().includes(searchTerm.toLowerCase()) || (item.propId && item.propId.toLowerCase().includes(searchTerm.toLowerCase())));
@@ -722,7 +841,7 @@ export default function App() {
       }
     });
     return result;
-  }, [itemsList, searchTerm, searchDate, selectedCategoryFilter, searchStatus, sortOption, isLab]);
+  }, [itemsList, searchTerm, searchDate, selectedCategoryFilter, searchStatus, sortOption, isLab, currentTable]);
 
   const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
   const paginatedItems = useMemo(() => { const startIndex = (currentPage - 1) * ITEMS_PER_PAGE; return filteredItems.slice(startIndex, startIndex + ITEMS_PER_PAGE); }, [filteredItems, currentPage]);
@@ -735,6 +854,14 @@ export default function App() {
       setSessionForm({ name: item ? item.name : '', date: item ? item.date : new Date().toISOString().slice(0,10), year: item ? item.year||'' : new Date().getFullYear()-1911, stage: item ? item.stage||'初盤' : '初盤', copyFromPrevious: false }); 
       setIsModalOpen(true); 
   };
+  
+  // 🟢 打開新增/編輯表單
+  const openTableModal = (item=null) => {
+      setModalType('table'); setEditItem(item);
+      setTableForm({ name: item ? item.name : '' });
+      setIsModalOpen(true);
+  };
+
   const openItemModal = (item=null) => { 
       setModalType('item'); setEditItem(item); setImagePreview(item?.imageUrl || '');
       const todayStr = new Date().toISOString().slice(0, 10);
@@ -798,7 +925,6 @@ export default function App() {
       {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
       {isSidebarOpen && <div className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm transition-opacity" onClick={() => setIsSidebarOpen(false)} />}
 
-      {/* 🟢 新增：全螢幕圖片放大視窗 */}
       {fullScreenImage && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setFullScreenImage(null)}>
           <button onClick={() => setFullScreenImage(null)} className="absolute top-4 right-4 text-white hover:text-slate-300 p-2 bg-black/50 rounded-full transition-colors"><X className="w-8 h-8"/></button>
@@ -857,13 +983,17 @@ export default function App() {
             {viewMode === 'items' && (
                 <>
                 <button onClick={()=>handleExportCSV()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95"><FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯出 CSV</span></button>
-                {!isLab && (
+                {/* 🟢 匯入按鈕限制：財產管理中，若無表單則無法匯入 */}
+                {!isLab && currentTable && (
                   <>
                   <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleImportCSV} />
                   <button onClick={()=>fileInputRef.current?.click()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯入 CSV</span></button>
                   </>
                 )}
-                <button onClick={()=>openItemModal()} className={`text-white px-3 py-2 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>
+                {/* 🟢 新增按鈕限制：財產管理中，若無表單則無法新增 */}
+                {(isLab || currentTable) && (
+                  <button onClick={()=>openItemModal()} className={`text-white px-3 py-2 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>
+                )}
                 </>
             )}
             {viewMode === 'sessions' && <button onClick={()=>openSessionModal()} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增清單</button>}
@@ -958,281 +1088,317 @@ export default function App() {
 
           {/* 🟡 [PAGINATED] Items (Equipment or Property) View */}
           {viewMode === 'items' && currentSession && (
-            <div className="space-y-4 animate-in fade-in duration-300">
-              {/* Filter Bar */}
-              <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl shadow-sm border border-slate-200 z-10 sticky top-0">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
-                  <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
+            <div className="space-y-4 animate-in fade-in duration-300 max-w-7xl mx-auto">
+              
+              {/* 🟢 新增：表單 (Tabs) 選擇列 */}
+              {!isLab && (
+                <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar py-1">
+                  {tables.map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => setCurrentTable(t)}
+                      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all border ${currentTable?.id === t.id ? `${SysConfig.colorClass} border-transparent text-white shadow-md` : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+                    >
+                      {t.name}
+                      {currentTable?.id === t.id && (
+                        <div className="flex items-center gap-1 ml-2 pl-2 border-l border-white/30">
+                          <Edit2 className="w-3.5 h-3.5 hover:scale-125 transition-transform cursor-pointer" onClick={(e) => { e.stopPropagation(); openTableModal(t); }} />
+                          <Trash2 className="w-3.5 h-3.5 hover:scale-125 transition-transform text-rose-200 hover:text-white cursor-pointer" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }} />
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                  <button onClick={() => openTableModal()} className="px-5 py-2.5 rounded-xl font-bold whitespace-nowrap border-2 border-dashed border-slate-300 text-slate-500 hover:bg-slate-100 hover:border-slate-400 flex items-center gap-1.5 transition-colors bg-white">
+                    <Plus className="w-4 h-4"/> 新增表單
+                  </button>
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 items-center hide-scrollbar">
-                    
-                    {/* Date Filter */}
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                        <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                            <Calendar className={`w-4 h-4 ${searchDate ? SysConfig.textClass : 'text-slate-500'}`} />
-                            <input type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title={searchDate ? `已篩選: ${searchDate}` : "依加入日期篩選"} />
-                        </div>
-                        {searchDate && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchDate} <button onClick={()=>setSearchDate('')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                    </div>
-                    
-                    {/* Lab Category Filter */}
-                    {isLab && (
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                        <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                            <Filter className={`w-4 h-4 ${selectedCategoryFilter !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                            <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類">
-                              <option value="all">所有分類</option>
-                              {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-                            </select>
-                        </div>
-                        {selectedCategoryFilter !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{categories.find(c => c.id === selectedCategoryFilter)?.name} <button onClick={()=>setSelectedCategoryFilter('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                    </div>
-                    )}
+              )}
 
-                    {/* Property Status Filter */}
-                    {!isLab && (
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                        <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                            <CheckSquare className={`w-4 h-4 ${searchStatus !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                            <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀況">
-                              <option value="all">全部狀況</option>
-                              <option value="未盤點">未盤點</option>
-                              <option value="已盤點">已盤點</option>
-                            </select>
-                        </div>
-                        {searchStatus !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchStatus} <button onClick={()=>setSearchStatus('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                    </div>
-                    )}
-
-                    {/* Sort Options */}
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                        <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                            <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'created_desc' ? SysConfig.textClass : 'text-slate-500'}`} />
-                            <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式">
-                                <option value="created_desc" hidden>預設(最新)</option>
-                                <option value="name">名稱排序</option>
-                                {isLab && <option value="quantity_desc">數量 (多→少)</option>}
-                                {isLab && <option value="quantity_asc">數量 (少→多)</option>}
-                                {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
-                                {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
-                            </select>
-                        </div>
-                        {sortOption !== 'created_desc' && (
-                           <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>
-                             {sortOption === 'name' && '名稱排序'}
-                             {sortOption === 'quantity_desc' && '數量 (多→少)'}
-                             {sortOption === 'quantity_asc' && '數量 (少→多)'}
-                             {sortOption === 'propId_asc' && '編號 (小→大)'}
-                             {sortOption === 'propId_desc' && '編號 (大→小)'}
-                             <button onClick={()=>setSortOption('created_desc')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
-                           </div>
-                        )}
-                    </div>
+              {/* 🟢 若無表單則顯示空狀態 */}
+              {!isLab && tables.length === 0 ? (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-12 text-center mt-6">
+                    <div className="mx-auto w-16 h-16 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center mb-4"><FileSpreadsheet className="w-8 h-8"/></div>
+                    <h3 className="text-xl font-bold text-slate-700 mb-2">此清單內尚未建立任何表單</h3>
+                    <p className="text-slate-500 mb-6 max-w-sm mx-auto">為了更好地分類盤點項目，請先新增一個表單（例如：財產盤點表、非消耗品盤點表）。</p>
+                    <button onClick={() => openTableModal()} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>新增第一份表單</button>
                 </div>
-              </div>
-
-              {/* Mobile Card View (Paginated) */}
-              <div className="block md:hidden">
-                <div className="space-y-4">
-                  {paginatedItems.map(item => {
-                    const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
-                    return (
-                      <div key={item.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex gap-3 relative">
-                        {item.imageUrl ? (
-                           <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100">
-                             <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={() => setFullScreenImage(item.imageUrl)} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
-                           </div>
-                        ) : (
-                           <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
-                             <ImageIcon className="w-5 h-5 mb-1"/>
-                             <span className="text-[10px]">無照片</span>
-                           </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-start mb-1 gap-2">
-                            <div className="min-w-0 flex-1">
-                              {!isLab && item.propId && <div className={`font-mono font-bold text-sm tracking-wider mb-0.5 truncate ${SysConfig.textClass}`}>{item.propId}</div>}
-                              <h3 className="font-bold text-base text-slate-800 truncate">{item.name}</h3>
+              ) : (
+                <>
+                  {/* Filter Bar */}
+                  <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl shadow-sm border border-slate-200 z-10 sticky top-0">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
+                      <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 items-center hide-scrollbar">
+                        
+                        {/* Date Filter */}
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                                <Calendar className={`w-4 h-4 ${searchDate ? SysConfig.textClass : 'text-slate-500'}`} />
+                                <input type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title={searchDate ? `已篩選: ${searchDate}` : "依加入日期篩選"} />
                             </div>
-                          </div>
-                          
-                          {/* 🟢 財產詳細資料展示 (手機版) */}
-                          {!isLab && (
-                             <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-2 mb-2 text-[10px] text-slate-600 bg-slate-50 p-2 rounded-lg">
-                                <div className="truncate"><span className="text-slate-400">廠牌:</span> {item.brandModel || '-'}</div>
-                                <div className="truncate"><span className="text-slate-400">現值:</span> ${item.value || 0}</div>
-                                <div className="truncate"><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div>
-                                <div className="truncate"><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
-                                <div className="col-span-2 truncate"><span className="text-slate-400">備註:</span> {item.note || '-'}</div>
-                             </div>
-                          )}
+                            {searchDate && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchDate} <button onClick={()=>setSearchDate('')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
+                        </div>
+                        
+                        {/* Lab Category Filter */}
+                        {isLab && (
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                                <Filter className={`w-4 h-4 ${selectedCategoryFilter !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
+                                <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類">
+                                  <option value="all">所有分類</option>
+                                  {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            {selectedCategoryFilter !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{categories.find(c => c.id === selectedCategoryFilter)?.name} <button onClick={()=>setSelectedCategoryFilter('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
+                        </div>
+                        )}
 
-                          {/* Tags & Meta */}
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                            {isLab ? (
-                                <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.categoryName}</span>
-                            ) : (
-                                <>
-                                {item.user && <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5"><UserCheck className="w-3 h-3"/>{item.user}</span>}
-                                <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.location || '無地點'}</span>
-                                </>
+                        {/* Property Status Filter */}
+                        {!isLab && (
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                                <CheckSquare className={`w-4 h-4 ${searchStatus !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
+                                <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀況">
+                                  <option value="all">全部狀況</option>
+                                  <option value="未盤點">未盤點</option>
+                                  <option value="已盤點">已盤點</option>
+                                </select>
+                            </div>
+                            {searchStatus !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchStatus} <button onClick={()=>setSearchStatus('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
+                        </div>
+                        )}
+
+                        {/* Sort Options */}
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                                <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'created_desc' ? SysConfig.textClass : 'text-slate-500'}`} />
+                                <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式">
+                                    <option value="created_desc" hidden>預設(最新)</option>
+                                    <option value="name">名稱排序</option>
+                                    {isLab && <option value="quantity_desc">數量 (多→少)</option>}
+                                    {isLab && <option value="quantity_asc">數量 (少→多)</option>}
+                                    {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
+                                    {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
+                                </select>
+                            </div>
+                            {sortOption !== 'created_desc' && (
+                               <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>
+                                 {sortOption === 'name' && '名稱排序'}
+                                 {sortOption === 'quantity_desc' && '數量 (多→少)'}
+                                 {sortOption === 'quantity_asc' && '數量 (少→多)'}
+                                 {sortOption === 'propId_asc' && '編號 (小→大)'}
+                                 {sortOption === 'propId_desc' && '編號 (大→小)'}
+                                 <button onClick={()=>setSortOption('created_desc')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
+                               </div>
                             )}
-                            {item.addDate && isLab && <span className={`inline-block bg-opacity-10 text-[10px] px-1.5 py-0.5 rounded font-bold ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')} ${SysConfig.textClass}`}>{item.addDate}</span>}
-                          </div>
-                          {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5"/> 更新: {item.lastUpdatedStr}</div>}
-                          
-                          {/* Bottom Action Area */}
-                          <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between gap-2">
-                            {isLab ? (
-                                <>
-                                <div className="flex gap-2 text-xs text-slate-600 font-mono">
-                                    <span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span>
+                        </div>
+                    </div>
+                  </div>
+
+                  {/* Mobile Card View (Paginated) */}
+                  <div className="block md:hidden">
+                    <div className="space-y-4">
+                      {paginatedItems.map(item => {
+                        const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
+                        return (
+                          <div key={item.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex gap-3 relative">
+                            {item.imageUrl ? (
+                               <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100">
+                                 <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={() => setFullScreenImage(item.imageUrl)} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
+                               </div>
+                            ) : (
+                               <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
+                                 <ImageIcon className="w-5 h-5 mb-1"/>
+                                 <span className="text-[10px]">無照片</span>
+                               </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex justify-between items-start mb-1 gap-2">
+                                <div className="min-w-0 flex-1">
+                                  {!isLab && item.propId && <div className={`font-mono font-bold text-sm tracking-wider mb-0.5 truncate ${SysConfig.textClass}`}>{item.propId}</div>}
+                                  <h3 className="font-bold text-base text-slate-800 truncate">{item.name}</h3>
                                 </div>
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
-                                    <div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                              </div>
+                              
+                              {/* 🟢 財產詳細資料展示 (手機版) */}
+                              {!isLab && (
+                                 <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-2 mb-2 text-[10px] text-slate-600 bg-slate-50 p-2 rounded-lg">
+                                    <div className="truncate"><span className="text-slate-400">廠牌:</span> {item.brandModel || '-'}</div>
+                                    <div className="truncate"><span className="text-slate-400">現值:</span> ${item.value || 0}</div>
+                                    <div className="truncate"><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div>
+                                    <div className="truncate"><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
+                                    <div className="col-span-2 truncate"><span className="text-slate-400">備註:</span> {item.note || '-'}</div>
+                                 </div>
+                              )}
+
+                              {/* Tags & Meta */}
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                {isLab ? (
+                                    <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.categoryName}</span>
+                                ) : (
+                                    <>
+                                    {item.user && <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5"><UserCheck className="w-3 h-3"/>{item.user}</span>}
+                                    <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.location || '無地點'}</span>
+                                    </>
+                                )}
+                                {item.addDate && isLab && <span className={`inline-block bg-opacity-10 text-[10px] px-1.5 py-0.5 rounded font-bold ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')} ${SysConfig.textClass}`}>{item.addDate}</span>}
+                              </div>
+                              {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5"/> 更新: {item.lastUpdatedStr}</div>}
+                              
+                              {/* Bottom Action Area */}
+                              <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between gap-2">
+                                {isLab ? (
+                                    <>
+                                    <div className="flex gap-2 text-xs text-slate-600 font-mono">
+                                        <span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                        <div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                                          <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
+                                          <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
+                                        </div>
+                                        <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}>
+                                          <Plus className="w-3 h-3"/> 借用
+                                        </button>
+                                    </div>
+                                    </>
+                                ) : (
+                                    <>
+                                    <button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                                        {item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}
+                                    </button>
+                                    <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
                                       <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
                                       <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
                                     </div>
-                                    <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}>
-                                      <Plus className="w-3 h-3"/> 借用
-                                    </button>
-                                </div>
-                                </>
-                            ) : (
-                                <>
-                                <button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
-                                    {item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}
-                                </button>
-                                <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
-                                  <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
-                                  <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
-                                </div>
-                                </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {filteredItems.length===0 && <div className="text-center py-10 text-slate-400">沒有找到相符資料</div>}
-                </div>
-                <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
-              </div>
-
-              {/* Desktop Table View (Paginated) */}
-              <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 sticky top-0 z-10 shadow-sm">
-                        <tr>
-                        <th className="p-3 w-14 text-center">圖</th>
-                        {isLab ? (
-                            <>
-                            <th className="p-3 font-semibold w-1/4">設備資訊</th>
-                            <th className="p-3 font-semibold w-1/4">分類 / 日期</th>
-                            <th className="p-3 font-semibold w-1/4">庫存狀態</th>
-                            <th className="p-3 font-semibold text-right w-1/4">操作</th>
-                            </>
-                        ) : (
-                            <>
-                            {/* 🟢 財產桌面版表頭調整 */}
-                            <th className="p-3 font-semibold w-[20%]">財產編號 / 名稱</th>
-                            <th className="p-3 font-semibold w-[15%]">廠牌型別</th>
-                            <th className="p-3 font-semibold w-[15%]">使用人 / 存置地點</th>
-                            <th className="p-3 font-semibold w-[20%]">取得日期 / 現值 / 年限</th>
-                            <th className="p-3 font-semibold w-[10%] text-center">狀況</th>
-                            <th className="p-3 font-semibold text-right w-[15%]">操作</th>
-                            </>
-                        )}
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {paginatedItems.map(item => {
-                        const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
-                        return (
-                            <tr key={item.id} className="hover:bg-slate-50/50 transition-colors group">
-                            <td className="p-3 text-center align-top pt-4">
-                                {item.imageUrl ? (
-                                    <div onClick={() => setFullScreenImage(item.imageUrl)} className="inline-block w-10 h-10 rounded-lg overflow-hidden border border-slate-200 hover:scale-150 transition-transform origin-left shadow-sm cursor-pointer">
-                                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
-                                    </div>
-                                ) : (
-                                    <div className="w-10 h-10 mx-auto rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
-                                        <ImageIcon className="w-4 h-4 mb-0.5"/>
-                                        <span className="text-[8px] leading-none scale-90 font-bold">無照片</span>
-                                    </div>
+                                    </>
                                 )}
-                            </td>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {filteredItems.length===0 && <div className="text-center py-10 text-slate-400">沒有找到相符資料</div>}
+                    </div>
+                    <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+                  </div>
+
+                  {/* Desktop Table View (Paginated) */}
+                  <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 sticky top-0 z-10 shadow-sm">
+                            <tr>
+                            <th className="p-3 w-14 text-center">圖</th>
                             {isLab ? (
                                 <>
-                                <td className="p-3 align-top">
-                                    <div className="font-bold text-slate-800">{item.name}</div>
-                                    <div className="text-xs text-slate-500 mt-1 max-w-[200px] truncate" title={item.note}>{item.note || '-'}</div>
-                                    {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
-                                </td>
-                                <td className="p-3 align-top">
-                                    <span className="inline-block bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs font-medium text-slate-600 mb-1">{item.categoryName}</span>
-                                    {item.addDate && <div className={`text-[10px] font-bold mt-1 ${SysConfig.textClass}`}>加入: {item.addDate}</div>}
-                                </td>
-                                <td className="p-3 align-top">
-                                    <div className="flex items-center gap-2">
-                                    <span className="font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-xs">總 {item.quantity}</span>
-                                    <span className="font-mono text-orange-600 bg-orange-50 px-2 py-0.5 rounded text-xs">借 {item.borrowedCount || 0}</span>
-                                    <span className={`font-mono px-2 py-0.5 rounded text-xs font-bold ${available === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'}`}>剩 {available}</span>
-                                    </div>
-                                </td>
-                                <td className="p-3 text-right align-top">
-                                    <div className="flex justify-end gap-1.5">
-                                    <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : SysConfig.colorClass}`}>
-                                        <Plus className="w-3.5 h-3.5"/> 借用
-                                    </button>
-                                    <button onClick={()=>openItemModal(item)} className="p-1.5 text-slate-400 hover:text-teal-600 bg-transparent hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4"/></button>
-                                    <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
-                                    </div>
-                                </td>
+                                <th className="p-3 font-semibold w-1/4">設備資訊</th>
+                                <th className="p-3 font-semibold w-1/4">分類 / 日期</th>
+                                <th className="p-3 font-semibold w-1/4">庫存狀態</th>
+                                <th className="p-3 font-semibold text-right w-1/4">操作</th>
                                 </>
                             ) : (
                                 <>
-                                <td className="p-3 align-top">
-                                    <div className={`font-mono font-bold text-sm tracking-wider mb-1 ${SysConfig.textClass}`}>{item.propId || '無編號'}</div>
-                                    <div className="font-bold text-slate-800 text-sm">{item.name}</div>
-                                    {item.lastUpdatedStr && <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
-                                </td>
-                                <td className="p-3 align-top text-xs text-slate-600">
-                                    {item.brandModel || '-'}
-                                </td>
-                                <td className="p-3 align-top">
-                                    <div className="text-sm font-medium text-slate-700 flex items-center gap-1"><UserCheck className="w-3.5 h-3.5 text-slate-400"/> {item.user || '-'}</div>
-                                    <div className="text-xs text-slate-500 mt-1">{item.location || '-'}</div>
-                                </td>
-                                <td className="p-3 align-top text-xs text-slate-600 space-y-1">
-                                    <div><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div>
-                                    <div><span className="text-slate-400">現值:</span> <span className="font-mono">${item.value || 0}</span></div>
-                                    <div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
-                                </td>
-                                <td className="p-3 align-top text-center">
-                                    <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">
-                                        {item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}
-                                    </button>
-                                </td>
-                                <td className="p-3 text-right align-top">
-                                    <div className="flex justify-end gap-1">
-                                    <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button>
-                                    <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
-                                    </div>
-                                </td>
+                                <th className="p-3 font-semibold w-[20%]">財產編號 / 名稱</th>
+                                <th className="p-3 font-semibold w-[15%]">廠牌型別</th>
+                                <th className="p-3 font-semibold w-[15%]">使用人 / 存置地點</th>
+                                <th className="p-3 font-semibold w-[20%]">取得日期 / 現值 / 年限</th>
+                                <th className="p-3 font-semibold w-[10%] text-center">狀況</th>
+                                <th className="p-3 font-semibold text-right w-[15%]">操作</th>
                                 </>
                             )}
                             </tr>
-                        );
-                        })}
-                        {filteredItems.length === 0 && <tr><td colSpan="6" className="p-12 text-center text-slate-400">沒有找到相符資料</td></tr>}
-                    </tbody>
-                    </table>
-                </div>
-                <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
-              </div>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {paginatedItems.map(item => {
+                            const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
+                            return (
+                                <tr key={item.id} className="hover:bg-slate-50/50 transition-colors group">
+                                <td className="p-3 text-center align-top pt-4">
+                                    {item.imageUrl ? (
+                                        <div onClick={() => setFullScreenImage(item.imageUrl)} className="inline-block w-10 h-10 rounded-lg overflow-hidden border border-slate-200 hover:scale-150 transition-transform origin-left shadow-sm cursor-pointer">
+                                            <img src={item.imageUrl} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
+                                        </div>
+                                    ) : (
+                                        <div className="w-10 h-10 mx-auto rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
+                                            <ImageIcon className="w-4 h-4 mb-0.5"/>
+                                            <span className="text-[8px] leading-none scale-90 font-bold">無照片</span>
+                                        </div>
+                                    )}
+                                </td>
+                                {isLab ? (
+                                    <>
+                                    <td className="p-3 align-top">
+                                        <div className="font-bold text-slate-800">{item.name}</div>
+                                        <div className="text-xs text-slate-500 mt-1 max-w-[200px] truncate" title={item.note}>{item.note || '-'}</div>
+                                        {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
+                                    </td>
+                                    <td className="p-3 align-top">
+                                        <span className="inline-block bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs font-medium text-slate-600 mb-1">{item.categoryName}</span>
+                                        {item.addDate && <div className={`text-[10px] font-bold mt-1 ${SysConfig.textClass}`}>加入: {item.addDate}</div>}
+                                    </td>
+                                    <td className="p-3 align-top">
+                                        <div className="flex items-center gap-2">
+                                        <span className="font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-xs">總 {item.quantity}</span>
+                                        <span className="font-mono text-orange-600 bg-orange-50 px-2 py-0.5 rounded text-xs">借 {item.borrowedCount || 0}</span>
+                                        <span className={`font-mono px-2 py-0.5 rounded text-xs font-bold ${available === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'}`}>剩 {available}</span>
+                                        </div>
+                                    </td>
+                                    <td className="p-3 text-right align-top">
+                                        <div className="flex justify-end gap-1.5">
+                                        <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : SysConfig.colorClass}`}>
+                                            <Plus className="w-3.5 h-3.5"/> 借用
+                                        </button>
+                                        <button onClick={()=>openItemModal(item)} className="p-1.5 text-slate-400 hover:text-teal-600 bg-transparent hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4"/></button>
+                                        <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
+                                        </div>
+                                    </td>
+                                    </>
+                                ) : (
+                                    <>
+                                    <td className="p-3 align-top">
+                                        <div className={`font-mono font-bold text-sm tracking-wider mb-1 ${SysConfig.textClass}`}>{item.propId || '無編號'}</div>
+                                        <div className="font-bold text-slate-800 text-sm">{item.name}</div>
+                                        {item.lastUpdatedStr && <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
+                                    </td>
+                                    <td className="p-3 align-top text-xs text-slate-600">
+                                        {item.brandModel || '-'}
+                                    </td>
+                                    <td className="p-3 align-top">
+                                        <div className="text-sm font-medium text-slate-700 flex items-center gap-1"><UserCheck className="w-3.5 h-3.5 text-slate-400"/> {item.user || '-'}</div>
+                                        <div className="text-xs text-slate-500 mt-1">{item.location || '-'}</div>
+                                    </td>
+                                    <td className="p-3 align-top text-xs text-slate-600 space-y-1">
+                                        <div><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div>
+                                        <div><span className="text-slate-400">現值:</span> <span className="font-mono">${item.value || 0}</span></div>
+                                        <div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
+                                    </td>
+                                    <td className="p-3 align-top text-center">
+                                        <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">
+                                            {item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}
+                                        </button>
+                                    </td>
+                                    <td className="p-3 text-right align-top">
+                                        <div className="flex justify-end gap-1">
+                                        <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button>
+                                        <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
+                                        </div>
+                                    </td>
+                                    </>
+                                )}
+                                </tr>
+                            );
+                            })}
+                            {filteredItems.length === 0 && <tr><td colSpan="6" className="p-12 text-center text-slate-400">沒有找到相符資料</td></tr>}
+                        </tbody>
+                        </table>
+                    </div>
+                    <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1353,7 +1519,6 @@ export default function App() {
                     </div>
                     <div className="space-y-2 mb-4">
                       <div className="flex justify-between"><span className="text-sm font-bold text-slate-700">{loan.borrower}</span><span className="text-xs text-slate-500 flex items-center gap-1"><Phone className="w-3 h-3"/> {loan.phone}</span></div>
-                      {/* 🟢 修改：為借用紀錄的設備名稱加上 truncate 防止超長撐破 */}
                       <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-sm font-medium text-slate-800 flex justify-between items-center gap-2">
                         <span className="truncate">{loan.equipmentName}</span>
                         <span className="bg-white border border-slate-200 px-2 py-0.5 rounded text-xs text-slate-600 shadow-sm flex-shrink-0">x{loan.quantity}</span>
@@ -1422,7 +1587,8 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className={`text-xl font-bold ${SysConfig.textClass} flex items-center gap-2`}>
-                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯計畫') : (isLab ? '新增版次' : '建立年度清單'))}
+                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯清單') : (isLab ? '新增版次' : '建立年度清單'))}
+                {modalType === 'table' && (editItem ? '編輯表單名稱' : '新增表單')}
                 {modalType === 'item' && (editItem ? (isLab ? '編輯設備' : '編輯財產') : (isLab ? '新增設備' : '新增財產'))}
                 {modalType === 'category' && (editItem ? '編輯分類' : '新增分類')}
               </h3>
@@ -1446,10 +1612,21 @@ export default function App() {
                 {!editItem && sessions.length > 0 && (
                   <div className={`flex items-center gap-3 p-4 bg-${themeColor}-50 rounded-xl border border-${themeColor}-100`}>
                     <input type="checkbox" id="copyFromPrevious" className={`w-5 h-5 text-${themeColor}-600 rounded focus:ring-${themeColor}-500 cursor-pointer`} checked={sessionForm.copyFromPrevious} onChange={e=>setSessionForm({...sessionForm, copyFromPrevious:e.target.checked})}/>
-                    <label htmlFor="copyFromPrevious" className={`text-sm text-${themeColor}-800 cursor-pointer select-none leading-relaxed`}><span className="font-bold block">複製上一期的{isLab?'設備':'財產'}資料？</span><span className={`text-xs text-${themeColor}-600/80`}>{isLab ? '將複製名稱、分類、總數等，借出數會歸零' : '將複製所有財產資料，盤點狀況會重置為「未盤點」'}</span></label>
+                    <label htmlFor="copyFromPrevious" className={`text-sm text-${themeColor}-800 cursor-pointer select-none leading-relaxed`}><span className="font-bold block">複製上一期的{isLab?'設備':'財產'}資料？</span><span className={`text-xs text-${themeColor}-600/80`}>{isLab ? '將複製名稱、分類、總數等，借出數會歸零' : '將複製所有表單與財產資料，盤點狀況會重置為「未盤點」'}</span></label>
                   </div>
                 )}
                 <button type="submit" className={`w-full text-white py-3 rounded-xl font-bold shadow-md mt-6 transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>儲存建立</button>
+              </form>
+            )}
+
+            {/* 🟢 Table Form (Property Only) */}
+            {modalType === 'table' && (
+              <form onSubmit={handleSaveTable} className="space-y-4">
+                <div>
+                  <label className="text-sm font-bold text-slate-700 mb-1 block">表單名稱</label>
+                  <input className={`w-full border border-slate-200 rounded-lg p-2.5 focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={tableForm.name} onChange={e=>setTableForm({...tableForm, name:e.target.value})} placeholder="例如: 財產盤點表、非消耗品盤點表" required autoFocus/>
+                </div>
+                <button type="submit" className={`w-full text-white py-3 rounded-xl font-bold shadow-md mt-4 transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>儲存表單</button>
               </form>
             )}
 
@@ -1477,7 +1654,6 @@ export default function App() {
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">現值</label><input type="number" className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.value} onChange={e=>setPropForm({...propForm, value:e.target.value})}/></div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
-                        {/* 🟢 取得日期加上隱藏的日期選擇器，自動轉換民國年 */}
                         <div>
                           <label className="text-xs font-bold text-slate-600 mb-1 block">取得日期</label>
                           <div className="relative flex items-center">
@@ -1506,7 +1682,6 @@ export default function App() {
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">使用年限</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.lifespan} onChange={e=>setPropForm({...propForm, lifespan:e.target.value})} placeholder="例如: 5年"/></div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
-                        {/* 🟢 交換位置：使用人移到存置地點前面 */}
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">使用人</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.user} onChange={e=>setPropForm({...propForm, user:e.target.value})}/></div>
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">存置地點</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.location} onChange={e=>setPropForm({...propForm, location:e.target.value})}/></div>
                       </div>
