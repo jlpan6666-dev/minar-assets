@@ -280,6 +280,7 @@ const AuthScreen = ({ setAppMode }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
+      {/* Background decoration */}
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-200/30 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -427,9 +428,13 @@ export default function App() {
         setCurrentTable(null);
         return;
     }
-    const qTables = query(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), where('sessionId', '==', currentSession.id), orderBy('createdAt', 'asc'));
+    // Remove orderBy to prevent index requirement issue when querying by sessionId
+    const qTables = query(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), where('sessionId', '==', currentSession.id));
     const unsubTables = onSnapshot(qTables, snap => {
         const fetchedTables = snap.docs.map(d => ({id: d.id, ...d.data()}));
+        
+        // 🟢 Sort in javascript to avoid the need for a composite index
+        fetchedTables.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
         setTables(fetchedTables);
         
         // Auto-select table if not selected or current one was deleted
@@ -983,14 +988,12 @@ export default function App() {
             {viewMode === 'items' && (
                 <>
                 <button onClick={()=>handleExportCSV()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95"><FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯出 CSV</span></button>
-                {/* 🟢 匯入按鈕限制：財產管理中，若無表單則無法匯入 */}
                 {!isLab && currentTable && (
                   <>
                   <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleImportCSV} />
                   <button onClick={()=>fileInputRef.current?.click()} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 md:px-3 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯入 CSV</span></button>
                   </>
                 )}
-                {/* 🟢 新增按鈕限制：財產管理中，若無表單則無法新增 */}
                 {(isLab || currentTable) && (
                   <button onClick={()=>openItemModal()} className={`text-white px-3 py-2 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>
                 )}
@@ -1587,7 +1590,7 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className={`text-xl font-bold ${SysConfig.textClass} flex items-center gap-2`}>
-                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯清單') : (isLab ? '新增版次' : '建立年度清單'))}
+                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯計畫') : (isLab ? '新增版次' : '建立年度清單'))}
                 {modalType === 'table' && (editItem ? '編輯表單名稱' : '新增表單')}
                 {modalType === 'item' && (editItem ? (isLab ? '編輯設備' : '編輯財產') : (isLab ? '新增設備' : '新增財產'))}
                 {modalType === 'category' && (editItem ? '編輯分類' : '新增分類')}
