@@ -538,7 +538,7 @@ export default function App() {
                 const location = row[7] || '';
                 const note = row[8] || '';
                 
-                // 🟢 檢查盤點狀態若為空白則設為未盤點
+                // 🟢 檢查盤點狀況若為空白則設為未盤點
                 const statusRaw = row[9] ? row[9].trim() : '';
                 const status = statusRaw === '' ? '未盤點' : statusRaw;
 
@@ -578,7 +578,8 @@ export default function App() {
             return [`"${(item.name||'').replace(/"/g, '""')}"`, `"${item.categoryName||''}"`, item.quantity, borrowed, remaining, `"${item.addDate||''}"`, `"${(item.note||'').replace(/"/g, '""')}"`].join(",");
         });
     } else {
-        headers = ["財產編號", "財產名稱", "廠牌型別", "現值", "取得日期", "使用年限", "使用人", "存置地點", "備註", "盤點狀態"];
+        // 🟢 修改匯出的 CSV 標題為「盤點狀況」
+        headers = ["財產編號", "財產名稱", "廠牌型別", "現值", "取得日期", "使用年限", "使用人", "存置地點", "備註", "盤點狀況"];
         rows = exportItems.map(item => {
             return [`"${item.propId||''}"`, `"${(item.name||'').replace(/"/g, '""')}"`, `"${(item.brandModel||'').replace(/"/g, '""')}"`, `"${item.value||''}"`, `"${item.acquireDate||''}"`, `"${item.lifespan||''}"`, `"${(item.user||'').replace(/"/g, '""')}"`, `"${(item.location||'').replace(/"/g, '""')}"`, `"${(item.note||'').replace(/"/g, '""')}"`, `"${item.status||'未盤點'}"`].join(",");
         });
@@ -690,7 +691,7 @@ export default function App() {
     try {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', colItemsName, item.id), { status: newStatus, updatedAt: serverTimestamp() });
         showToast(`標記為${newStatus}`);
-    } catch(e) { showToast("狀態更新失敗", "error"); }
+    } catch(e) { showToast("狀況更新失敗", "error"); }
   };
 
   const deleteItem = (id) => {
@@ -994,8 +995,8 @@ export default function App() {
                     <div className="flex items-center gap-1 flex-shrink-0">
                         <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                             <CheckSquare className={`w-4 h-4 ${searchStatus !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                            <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀態">
-                              <option value="all">全部狀態</option>
+                            <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀況">
+                              <option value="all">全部狀況</option>
                               <option value="未盤點">未盤點</option>
                               <option value="已盤點">已盤點</option>
                             </select>
@@ -1140,7 +1141,7 @@ export default function App() {
                             <th className="p-3 font-semibold w-[15%]">廠牌型別</th>
                             <th className="p-3 font-semibold w-[15%]">使用人 / 存置地點</th>
                             <th className="p-3 font-semibold w-[20%]">取得日期 / 現值 / 年限</th>
-                            <th className="p-3 font-semibold w-[10%] text-center">狀態</th>
+                            <th className="p-3 font-semibold w-[10%] text-center">狀況</th>
                             <th className="p-3 font-semibold text-right w-[15%]">操作</th>
                             </>
                         )}
@@ -1211,7 +1212,7 @@ export default function App() {
                                     <div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
                                 </td>
                                 <td className="p-3 align-top text-center">
-                                    <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀態">
+                                    <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">
                                         {item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}
                                     </button>
                                 </td>
@@ -1445,7 +1446,7 @@ export default function App() {
                 {!editItem && sessions.length > 0 && (
                   <div className={`flex items-center gap-3 p-4 bg-${themeColor}-50 rounded-xl border border-${themeColor}-100`}>
                     <input type="checkbox" id="copyFromPrevious" className={`w-5 h-5 text-${themeColor}-600 rounded focus:ring-${themeColor}-500 cursor-pointer`} checked={sessionForm.copyFromPrevious} onChange={e=>setSessionForm({...sessionForm, copyFromPrevious:e.target.checked})}/>
-                    <label htmlFor="copyFromPrevious" className={`text-sm text-${themeColor}-800 cursor-pointer select-none leading-relaxed`}><span className="font-bold block">複製上一期的{isLab?'設備':'財產'}資料？</span><span className={`text-xs text-${themeColor}-600/80`}>{isLab ? '將複製名稱、分類、總數等，借出數會歸零' : '將複製所有財產資料，盤點狀態會重置為「未盤點」'}</span></label>
+                    <label htmlFor="copyFromPrevious" className={`text-sm text-${themeColor}-800 cursor-pointer select-none leading-relaxed`}><span className="font-bold block">複製上一期的{isLab?'設備':'財產'}資料？</span><span className={`text-xs text-${themeColor}-600/80`}>{isLab ? '將複製名稱、分類、總數等，借出數會歸零' : '將複製所有財產資料，盤點狀況會重置為「未盤點」'}</span></label>
                   </div>
                 )}
                 <button type="submit" className={`w-full text-white py-3 rounded-xl font-bold shadow-md mt-6 transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>儲存建立</button>
@@ -1510,7 +1511,7 @@ export default function App() {
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">存置地點</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.location} onChange={e=>setPropForm({...propForm, location:e.target.value})}/></div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
-                        <div><label className="text-xs font-bold text-slate-600 mb-1 block">狀態</label><select className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none bg-white`} value={propForm.status} onChange={e=>setPropForm({...propForm, status:e.target.value})}><option value="未盤點">未盤點</option><option value="已盤點">已盤點</option></select></div>
+                        <div><label className="text-xs font-bold text-slate-600 mb-1 block">狀況</label><select className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none bg-white`} value={propForm.status} onChange={e=>setPropForm({...propForm, status:e.target.value})}><option value="未盤點">未盤點</option><option value="已盤點">已盤點</option></select></div>
                         <div><label className="text-xs font-bold text-slate-600 mb-1 block">備註</label><input className={`w-full border border-slate-200 rounded-md p-2 text-sm focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={propForm.note} onChange={e=>setPropForm({...propForm, note:e.target.value})}/></div>
                       </div>
                     </div>
