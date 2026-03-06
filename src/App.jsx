@@ -385,7 +385,7 @@ export default function App() {
   const [cartItems, setCartItems] = useState([]);
   const [borrowForm, setBorrowForm] = useState({ borrower: '', phone: '', date: new Date().toISOString().slice(0,10), purpose: '', borrowDays: 7 });
   const [mobileBorrowTab, setMobileBorrowTab] = useState('equipment');
-  const [fullScreenImage, setFullScreenImage] = useState(null); // 🟢 新增：全螢幕圖片預覽狀態
+  const [fullScreenImage, setFullScreenImage] = useState(null); // 🟢 全螢幕圖片預覽狀態
 
   // DB Path Helpers
   const colSessionsName = appMode === 'lab' ? 'sessions' : `sessions_${appMode}`;
@@ -538,7 +538,7 @@ export default function App() {
                 const location = row[7] || '';
                 const note = row[8] || '';
                 
-                // 🟢 修改：檢查盤點狀態若為空白則設為未盤點
+                // 🟢 檢查盤點狀態若為空白則設為未盤點
                 const statusRaw = row[9] ? row[9].trim() : '';
                 const status = statusRaw === '' ? '未盤點' : statusRaw;
 
@@ -592,6 +592,42 @@ export default function App() {
     showToast("CSV 下載已開始");
   };
 
+  // 🟢 強化刪除清單機制：連同附屬的設備/財產資料一起刪除
+  const deleteSession = (id) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: "刪除清單",
+      message: "確定要刪除此清單嗎？（其內含的所有資料也會一併刪除）",
+      isDangerous: true,
+      action: async () => {
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colSessionsName, id));
+          
+          // 串聯刪除該清單下的所有項目，避免成為無主資料
+          const qItems = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', id));
+          const snapshot = await getDocs(qItems);
+          const batch = writeBatch(db);
+          snapshot.forEach(d => {
+            batch.delete(d.ref);
+          });
+          await batch.commit();
+
+          setConfirmDialog(p => ({ ...p, isOpen: false }));
+          showToast("清單已徹底刪除");
+          
+          // 如果刪除的是當前正在檢視的清單，則跳回總覽
+          if (currentSession && currentSession.id === id) {
+            setCurrentSession(null);
+            setViewMode('sessions');
+          }
+        } catch (err) {
+          console.error(err);
+          showToast("刪除失敗", "error");
+        }
+      }
+    });
+  };
+
   const handleSaveSession = async (e) => {
     e.preventDefault();
     try {
@@ -639,7 +675,6 @@ export default function App() {
         const cat = categories.find(c => c.id === equipForm.categoryId);
         payload = { ...payload, name: equipForm.name, quantity: parseInt(equipForm.quantity), categoryId: equipForm.categoryId, categoryName: cat ? cat.name : '未分類', note: equipForm.note, addDate: equipForm.addDate || '', ...(editItem ? {} : { borrowedCount: 0 }) };
       } else {
-        // 🟢 修正：確保 imageUrl 不會被 propForm 中的空字串覆蓋
         payload = { ...payload, ...propForm, imageUrl: imagePreview || '', ...(editItem ? {} : { createdAt: serverTimestamp() }) };
       }
 
@@ -777,12 +812,12 @@ export default function App() {
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <button onClick={() => { setViewMode('dashboard'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'dashboard' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Home className="w-5 h-5" /> 首頁概覽</button>
-          <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'sessions' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><FolderOpen className="w-5 h-5" /> {isLab ? '版次總覽' : '盤點計畫總覽'}</button>
+          <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'sessions' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><FolderOpen className="w-5 h-5" /> {isLab ? '版次總覽' : '清單總覽'}</button>
           {isLab && <button onClick={() => { setViewMode('categories'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'categories' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Settings className="w-5 h-5" /> 全域分類設定</button>}
           
           {currentSession && (
             <div className="mt-6 pt-6 border-t border-white/10">
-              <p className={`px-4 text-xs font-bold uppercase mb-2 ${SysConfig.textClass} brightness-150`}>當前計畫：{currentSession.name}</p>
+              <p className={`px-4 text-xs font-bold uppercase mb-2 ${SysConfig.textClass} brightness-150`}>當前清單：{currentSession.name}</p>
               <button onClick={() => { setViewMode('items'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'items' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><LayoutGrid className="w-5 h-5" /> {isLab ? '設備列表' : '財產總覽'}</button>
               {isLab && (
                 <>
@@ -804,10 +839,9 @@ export default function App() {
              <div>
                 <div className="min-w-0 flex-1 pr-2">
                   <h2 className="text-lg md:text-2xl font-bold text-slate-800 truncate max-w-[200px] md:max-w-md">
-                    {viewMode === 'sessions' && (isLab ? '版次管理' : '年度盤點計畫')}
+                    {viewMode === 'sessions' && (isLab ? '版次管理' : '年度盤點清單')}
                     {viewMode === 'categories' && '分類設定'}
                     {viewMode === 'dashboard' && '首頁概覽'}
-                    {/* 🟢 移除標題後面的「清單」與「財產」文字 */}
                     {currentSession && viewMode === 'items' && currentSession.name}
                     {currentSession && viewMode === 'borrow-request' && `${currentSession.name} - 借用登記`}
                     {currentSession && viewMode === 'loans' && `${currentSession.name} - 借還紀錄`}
@@ -831,7 +865,7 @@ export default function App() {
                 <button onClick={()=>openItemModal()} className={`text-white px-3 py-2 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>
                 </>
             )}
-            {viewMode === 'sessions' && <button onClick={()=>openSessionModal()} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增計畫</button>}
+            {viewMode === 'sessions' && <button onClick={()=>openSessionModal()} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增清單</button>}
             {viewMode === 'categories' && <button onClick={()=>{setModalType('category');setEditItem(null);setCatForm({name:''});setIsModalOpen(true)}} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增分類</button>}
           </div>
         </header>
@@ -843,11 +877,10 @@ export default function App() {
              <div className="space-y-6 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-4">
                   <div className={`p-2 rounded-lg bg-opacity-10 text-opacity-100 ${SysConfig.colorClass.replace('bg-', 'bg-').replace('600', '100')} ${SysConfig.textClass}`}><Sparkles className="w-5 h-5"/></div>
-                  <span className="text-sm font-bold text-slate-500">目前鎖定計畫：<span className={`text-base ${SysConfig.textClass}`}>{dashboardStats.latestSessionName}</span></span>
+                  <span className="text-sm font-bold text-slate-500">目前鎖定清單：<span className={`text-base ${SysConfig.textClass}`}>{dashboardStats.latestSessionName}</span></span>
                 </div>
-                {/* 🟢 調整順序：管理中版次總數拉到最前面 */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <StatCard title={isLab ? "管理中版次總數" : "歷史計畫總數"} value={sessions.length} icon={FolderOpen} colorClass="bg-slate-700" onClick={() =>setViewMode('sessions')} />
+                    <StatCard title={isLab ? "管理中版次總數" : "歷史清單總數"} value={sessions.length} icon={FolderOpen} colorClass="bg-slate-700" onClick={() =>setViewMode('sessions')} />
                     <StatCard title={isLab ? "最新版次設備種類" : "清單財產總筆數"} value={dashboardStats.totalItems} icon={Box} colorClass={SysConfig.colorClass} onClick={() => handleStatClick('items')} />
                     <StatCard title={isLab ? "目前外借中" : "已完成盤點"} value={dashboardStats.totalBorrowedOrInventoried} icon={Activity} colorClass={isLab ? "bg-orange-500" : "bg-emerald-500"} onClick={() => handleStatClick('borrowed')} />
                     <StatCard title={isLab ? "低庫存警示" : "尚未盤點"} value={dashboardStats.lowStockOrUninventoried} subtext={isLab ? "庫存低於 3 件" : "待處理項目"} icon={AlertTriangle} colorClass="bg-rose-500" onClick={() => handleStatClick('lowstock')} />
@@ -880,7 +913,7 @@ export default function App() {
                     </div>
                     <div className={`bg-gradient-to-br from-${themeColor}-600 to-${themeColor}-800 rounded-2xl p-6 text-white shadow-lg flex flex-col justify-center relative overflow-hidden`}>
                         <h3 className="font-bold text-lg mb-2 relative z-10">系統提示</h3>
-                        <p className={`text-${themeColor}-100 text-sm mb-6 relative z-10`}>系統預設鎖定最新計畫。若需檢視過去資料，請前往「版次總覽」。</p>
+                        <p className={`text-${themeColor}-100 text-sm mb-6 relative z-10`}>系統預設鎖定最新清單。若需檢視過去資料，請前往「版次總覽」。</p>
                         <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); }} className="w-full bg-white/20 hover:bg-white/30 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 relative z-10 border border-white/20">查看所有 <ChevronRight className="w-4 h-4"/></button>
                     </div>
                 </div>
@@ -888,8 +921,8 @@ export default function App() {
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center mt-6">
                      <div className="mx-auto w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mb-4"><CheckSquare className="w-8 h-8"/></div>
                      <h3 className="text-xl font-bold text-slate-700 mb-2">開始盤點作業</h3>
-                     <p className="text-slate-500 mb-6 max-w-md mx-auto">請前往「計畫總覽」選擇您要進行盤點的年度與階段。您可以隨時匯入學校提供的 Excel 清單，或是將盤點結果匯出為 CSV 檔案以利歸檔。</p>
-                     <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); }} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>前往盤點計畫總覽</button>
+                     <p className="text-slate-500 mb-6 max-w-md mx-auto">請前往「清單總覽」選擇您要進行盤點的年度與階段。您可以隨時匯入學校提供的 Excel 清單，或是將盤點結果匯出為 CSV 檔案以利歸檔。</p>
+                     <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); }} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>前往盤點清單總覽</button>
                   </div>
                 )}
              </div>
@@ -918,7 +951,7 @@ export default function App() {
                   </div>
                 </div>
               ))}
-              {sessions.length === 0 && <div className="col-span-full text-center py-20 text-slate-400">尚未建立任何計畫，請點擊右上角「新增」。</div>}
+              {sessions.length === 0 && <div className="col-span-full text-center py-20 text-slate-400">尚未建立任何清單，請點擊右上角「新增」。</div>}
             </div>
           )}
 
@@ -1007,7 +1040,6 @@ export default function App() {
                       <div key={item.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex gap-3 relative">
                         {item.imageUrl ? (
                            <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100">
-                             {/* 🟢 修改：增加點擊放大的 onClick 事件 */}
                              <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={() => setFullScreenImage(item.imageUrl)} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
                            </div>
                         ) : (
@@ -1017,10 +1049,8 @@ export default function App() {
                            </div>
                         )}
                         <div className="flex-1 min-w-0">
-                          {/* 🟢 修改：將編輯與刪除按鈕從此處移除，讓名稱有更完整的顯示空間 */}
                           <div className="flex justify-between items-start mb-1 gap-2">
                             <div className="min-w-0 flex-1">
-                              {/* 🟢 修改：將財產編號加上 truncate，過長時顯示省略號 */}
                               {!isLab && item.propId && <div className={`font-mono font-bold text-sm tracking-wider mb-0.5 truncate ${SysConfig.textClass}`}>{item.propId}</div>}
                               <h3 className="font-bold text-base text-slate-800 truncate">{item.name}</h3>
                             </div>
@@ -1052,7 +1082,6 @@ export default function App() {
                           {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5"/> 更新: {item.lastUpdatedStr}</div>}
                           
                           {/* Bottom Action Area */}
-                          {/* 🟢 修改：將編輯與刪除圖示移動到此處，與盤點按鈕或借用按鈕並排 */}
                           <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between gap-2">
                             {isLab ? (
                                 <>
@@ -1164,9 +1193,7 @@ export default function App() {
                                 </>
                             ) : (
                                 <>
-                                {/* 🟢 財產詳細資料展示 (電腦版) */}
                                 <td className="p-3 align-top">
-                                    {/* 🟢 修改：將財產編號放大並套用主題色 */}
                                     <div className={`font-mono font-bold text-sm tracking-wider mb-1 ${SysConfig.textClass}`}>{item.propId || '無編號'}</div>
                                     <div className="font-bold text-slate-800 text-sm">{item.name}</div>
                                     {item.lastUpdatedStr && <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
@@ -1394,7 +1421,7 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className={`text-xl font-bold ${SysConfig.textClass} flex items-center gap-2`}>
-                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯計畫') : (isLab ? '新增版次' : '建立年度計畫'))}
+                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯計畫') : (isLab ? '新增版次' : '建立年度清單'))}
                 {modalType === 'item' && (editItem ? (isLab ? '編輯設備' : '編輯財產') : (isLab ? '新增設備' : '新增財產'))}
                 {modalType === 'category' && (editItem ? '編輯分類' : '新增分類')}
               </h3>
