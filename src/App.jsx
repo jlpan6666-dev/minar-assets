@@ -361,11 +361,24 @@ export default function App() {
   const [dragState, setDragState] = useState(null); 
   const [localLayouts, setLocalLayouts] = useState({});
   const [layoutForm, setLayoutForm] = useState({ label: '' });
-  const [layoutScale, setLayoutScale] = useState(1); // 縮放狀態
+  const [layoutScale, setLayoutScale] = useState(1); 
   
-  // 🟢 畫布的平移與拖曳狀態
-  const [canvasPan, setCanvasPan] = useState({ x: 0, y: 0 });
+  // 🟢 畫布平移與追蹤 Ref
+  const mapContainerRef = useRef(null);
+  const pointerCache = useRef({});
+  const pinchStartRef = useRef(null);
+  const canvasPanRef = useRef({ x: 0, y: 0 });
+  const [canvasPan, setCanvasPanState] = useState({ x: 0, y: 0 });
   const [canvasDrag, setCanvasDrag] = useState(null);
+
+  // Helper to keep ref synced with state for reliable reads in event handlers
+  const setCanvasPan = (newValOrFn) => {
+      setCanvasPanState(prev => {
+          const val = typeof newValOrFn === 'function' ? newValOrFn(prev) : newValOrFn;
+          canvasPanRef.current = val;
+          return val;
+      });
+  };
   
   // Dashboard Stats
   const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, groupedActivity: [] });
@@ -496,6 +509,39 @@ export default function App() {
     });
     return () => unsubLayouts();
   }, [user, currentSession, isLab]);
+
+  // 🟢 滾輪放大縮小效果 (Wheel Zoom logic)
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e) => {
+        e.preventDefault(); 
+        const zoomDirection = e.deltaY < 0 ? 1 : -1;
+        
+        setLayoutScale(prevScale => {
+            const newScale = Math.min(Math.max(0.5, prevScale + zoomDirection * 0.1), 3);
+            if (newScale === prevScale) return prevScale;
+            
+            const rect = container.getBoundingClientRect();
+            const pointerX = e.clientX - rect.left;
+            const pointerY = e.clientY - rect.top;
+            
+            setCanvasPan(prevPan => {
+                const canvasX = (pointerX - prevPan.x) / prevScale;
+                const canvasY = (pointerY - prevPan.y) / prevScale;
+                return {
+                    x: pointerX - canvasX * newScale,
+                    y: pointerY - canvasY * newScale
+                };
+            });
+            return newScale;
+        });
+    };
+    
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [viewMode, currentSession]); 
 
   // Dashboard Logic
   useEffect(() => {
@@ -1044,19 +1090,64 @@ export default function App() {
     } catch (err) { showToast("操作失敗", "error"); }
   };
 
-  // 🟢 畫布平移拖曳邏輯 (像 Google Maps)
+  // 🟢 畫布平移與兩指縮放邏輯
   const handleCanvasPointerDown = (e) => {
       e.currentTarget.setPointerCapture(e.pointerId);
-      setCanvasDrag({
-          startX: e.clientX,
-          startY: e.clientY,
-          initX: canvasPan.x,
-          initY: canvasPan.y
-      });
+      pointerCache.current[e.pointerId] = { x: e.clientX, y: e.clientY };
+      const pointerIds = Object.keys(pointerCache.current);
+      
+      if (pointerIds.length === 2) {
+          const p1 = pointerCache.current[pointerIds[0]];
+          const p2 = pointerCache.current[pointerIds[1]];
+          pinchStartRef.current = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+          setCanvasDrag(null); 
+      } else if (pointerIds.length === 1) {
+          setCanvasDrag({
+              startX: e.clientX,
+              startY: e.clientY,
+              initX: canvasPanRef.current.x,
+              initY: canvasPanRef.current.y
+          });
+      }
   };
 
   const handleCanvasPointerMove = (e) => {
-      if (canvasDrag) {
+      if (pointerCache.current[e.pointerId]) {
+          pointerCache.current[e.pointerId] = { x: e.clientX, y: e.clientY };
+      }
+      
+      const pointerIds = Object.keys(pointerCache.current);
+      
+      if (pointerIds.length === 2 && pinchStartRef.current && mapContainerRef.current) {
+          const p1 = pointerCache.current[pointerIds[0]];
+          const p2 = pointerCache.current[pointerIds[1]];
+          const currentDist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+          const distDiff = currentDist - pinchStartRef.current;
+          
+          if (Math.abs(distDiff) > 1) { 
+              const scaleDiff = distDiff * 0.005; 
+              const rect = mapContainerRef.current.getBoundingClientRect();
+              const centerX = ((p1.x + p2.x) / 2) - rect.left;
+              const centerY = ((p1.y + p2.y) / 2) - rect.top;
+
+              setLayoutScale(prevScale => {
+                  const newScale = Math.min(Math.max(0.5, prevScale + scaleDiff), 3);
+                  if (newScale === prevScale) return prevScale;
+                  
+                  setCanvasPan(prevPan => {
+                      const canvasX = (centerX - prevPan.x) / prevScale;
+                      const canvasY = (centerY - prevPan.y) / prevScale;
+                      return {
+                          x: centerX - canvasX * newScale,
+                          y: centerY - canvasY * newScale
+                      };
+                  });
+                  return newScale;
+              });
+              
+              pinchStartRef.current = currentDist;
+          }
+      } else if (pointerIds.length === 1 && canvasDrag) {
           const dx = e.clientX - canvasDrag.startX;
           const dy = e.clientY - canvasDrag.startY;
           setCanvasPan({
@@ -1067,13 +1158,52 @@ export default function App() {
   };
 
   const handleCanvasPointerUp = (e) => {
-      if (canvasDrag) {
-          e.currentTarget.releasePointerCapture(e.pointerId);
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      delete pointerCache.current[e.pointerId];
+      const pointerIds = Object.keys(pointerCache.current);
+      
+      if (pointerIds.length < 2) {
+          pinchStartRef.current = null;
+      }
+      if (pointerIds.length === 1) {
+          const remainingId = pointerIds[0];
+          const p = pointerCache.current[remainingId];
+          setCanvasDrag({
+              startX: p.x,
+              startY: p.y,
+              initX: canvasPanRef.current.x,
+              initY: canvasPanRef.current.y
+          });
+      } else if (pointerIds.length === 0) {
           setCanvasDrag(null);
       }
   };
 
-  // 🟢 設備模型拖曳邏輯
+  // 🟢 控制 UI 按鈕縮放
+  const handleZoomClick = (direction) => {
+    const container = mapContainerRef.current;
+    if (!container) return;
+    
+    setLayoutScale(prevScale => {
+        const newScale = Math.min(Math.max(0.5, prevScale + direction * 0.1), 3);
+        if (newScale === prevScale) return prevScale;
+        
+        const rect = container.getBoundingClientRect();
+        const pointerX = rect.width / 2;
+        const pointerY = rect.height / 2;
+        
+        setCanvasPan(prevPan => {
+            const canvasX = (pointerX - prevPan.x) / prevScale;
+            const canvasY = (pointerY - prevPan.y) / prevScale;
+            return {
+                x: pointerX - canvasX * newScale,
+                y: pointerY - canvasY * newScale
+            };
+        });
+        return newScale;
+    });
+  };
+
   const handleAddLayoutItem = async (type) => {
       if (!currentSession) return;
       const typeLabels = { computer: '電腦', server: '伺服器', printer: '印表機', desk: '辦公桌' };
@@ -1752,14 +1882,15 @@ export default function App() {
                       
                       {/* Zoom Controls */}
                       <div className="ml-auto flex items-center gap-2 bg-white px-2 py-1.5 rounded-lg border border-slate-200 shadow-sm shrink-0">
-                          <button onClick={() => setLayoutScale(s => Math.max(0.5, s - 0.1))} className="p-1 hover:bg-slate-100 rounded text-slate-500"><ZoomOut className="w-4 h-4"/></button>
+                          <button onClick={() => handleZoomClick(-1)} className="p-1 hover:bg-slate-100 rounded text-slate-500"><ZoomOut className="w-4 h-4"/></button>
                           <span className="text-xs font-bold text-slate-600 w-10 text-center">{Math.round(layoutScale * 100)}%</span>
-                          <button onClick={() => setLayoutScale(s => Math.min(2, s + 0.1))} className="p-1 hover:bg-slate-100 rounded text-slate-500"><ZoomIn className="w-4 h-4"/></button>
+                          <button onClick={() => handleZoomClick(1)} className="p-1 hover:bg-slate-100 rounded text-slate-500"><ZoomIn className="w-4 h-4"/></button>
                       </div>
                   </div>
                   
                   {/* Canvas Area Container - 鎖定外層、處理畫布平移 */}
                   <div 
+                      ref={mapContainerRef}
                       className={`flex-1 relative bg-slate-300 overflow-hidden touch-none ${canvasDrag ? 'cursor-grabbing' : 'cursor-grab'}`}
                       onPointerDown={handleCanvasPointerDown}
                       onPointerMove={handleCanvasPointerMove}
