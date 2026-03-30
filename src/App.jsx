@@ -30,7 +30,7 @@ import {
   History, UserCheck, Phone, Clock, FileDown, ArrowUpRight, ArrowDownLeft, 
   MousePointerClick, Sparkles, Timer, ShoppingCart, Minus, ArrowUpDown, 
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
-  FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer
+  FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut
 } from 'lucide-react';
 
 // ==========================================
@@ -361,6 +361,7 @@ export default function App() {
   const [dragState, setDragState] = useState(null); 
   const [localLayouts, setLocalLayouts] = useState({});
   const [layoutForm, setLayoutForm] = useState({ label: '' });
+  const [layoutScale, setLayoutScale] = useState(1); // 🟢 縮放狀態
   
   // Dashboard Stats
   const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, groupedActivity: [] });
@@ -437,6 +438,7 @@ export default function App() {
     setIsSelectionMode(false);
     setSelectedItemIds([]);
     setIsActionMenuOpen(false);
+    setLayoutScale(1);
   }, [appMode]);
 
   // Reset Pagination & Selection when Filters/View Change
@@ -477,7 +479,7 @@ export default function App() {
     return () => unsubTables();
   }, [user, currentSession, isLab, colTablesName]);
 
-  // 🟢 Listener for Layout Items (Lab Only)
+  // Listener for Layout Items (Lab Only)
   useEffect(() => {
     if (!user || !currentSession || !isLab) {
         setLayoutItems([]);
@@ -1037,6 +1039,7 @@ export default function App() {
     } catch (err) { showToast("操作失敗", "error"); }
   };
 
+  // 🟢 Layout Interaction Logic
   const handleAddLayoutItem = async (type) => {
       if (!currentSession) return;
       const typeLabels = { computer: '電腦', server: '伺服器', printer: '印表機', desk: '辦公桌' };
@@ -1056,33 +1059,33 @@ export default function App() {
 
   const handleLayoutPointerDown = (e, item) => {
       e.stopPropagation();
-      e.currentTarget.setPointerCapture(e.pointerId);
+      e.preventDefault(); 
       setDragState({ id: item.id, startX: e.clientX, startY: e.clientY, initX: item.x, initY: item.y });
   };
 
-  const handleLayoutPointerMove = (e, itemId) => {
-      if (dragState && dragState.id === itemId) {
-          const dx = e.clientX - dragState.startX;
-          const dy = e.clientY - dragState.startY;
-          setLocalLayouts(prev => ({ ...prev, [itemId]: { x: Math.max(0, dragState.initX + dx), y: Math.max(0, dragState.initY + dy) } }));
+  const handleLayoutPointerMove = (e) => {
+      if (dragState) {
+          const dx = (e.clientX - dragState.startX) / layoutScale;
+          const dy = (e.clientY - dragState.startY) / layoutScale;
+          setLocalLayouts(prev => ({ ...prev, [dragState.id]: { x: Math.max(0, dragState.initX + dx), y: Math.max(0, dragState.initY + dy) } }));
       }
   };
 
-  const handleLayoutPointerUp = async (e, item) => {
-      if (dragState && dragState.id === item.id) {
-          e.currentTarget.releasePointerCapture(e.pointerId);
-          const finalX = localLayouts[item.id]?.x ?? dragState.initX;
-          const finalY = localLayouts[item.id]?.y ?? dragState.initY;
+  const handleLayoutPointerUp = async () => {
+      if (dragState) {
+          const id = dragState.id;
+          const finalX = localLayouts[id]?.x ?? dragState.initX;
+          const finalY = localLayouts[id]?.y ?? dragState.initY;
           setDragState(null);
           
           setLocalLayouts(prev => {
               const next = {...prev};
-              delete next[item.id];
+              delete next[id];
               return next;
           });
 
           try {
-              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', item.id), { x: finalX, y: finalY });
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', id), { x: finalX, y: finalY });
           } catch(err) { console.error(err); }
       }
   };
@@ -1706,21 +1709,31 @@ export default function App() {
                       <button onClick={() => handleAddLayoutItem('server')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Server className="w-4 h-4"/> 伺服器</button>
                       <button onClick={() => handleAddLayoutItem('printer')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Printer className="w-4 h-4"/> 印表機</button>
                       <button onClick={() => handleAddLayoutItem('desk')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Box className="w-4 h-4"/> 辦公桌</button>
-                      <div className="ml-auto text-xs text-slate-400 font-medium whitespace-nowrap flex items-center gap-1"><MousePointerClick className="w-3 h-3"/> 直接拖曳移動，雙擊編輯名稱</div>
+                      
+                      {/* Zoom Controls */}
+                      <div className="ml-auto flex items-center gap-2 bg-white px-2 py-1.5 rounded-lg border border-slate-200 shadow-sm shrink-0">
+                          <button onClick={() => setLayoutScale(s => Math.max(0.5, s - 0.1))} className="p-1 hover:bg-slate-100 rounded text-slate-500"><ZoomOut className="w-4 h-4"/></button>
+                          <span className="text-xs font-bold text-slate-600 w-10 text-center">{Math.round(layoutScale * 100)}%</span>
+                          <button onClick={() => setLayoutScale(s => Math.min(2, s + 0.1))} className="p-1 hover:bg-slate-100 rounded text-slate-500"><ZoomIn className="w-4 h-4"/></button>
+                      </div>
                   </div>
                   
                   {/* Canvas Area */}
-                  <div 
-                    className="flex-1 relative bg-slate-100 overflow-auto cursor-crosshair touch-none"
-                    onPointerMove={(e) => dragState && handleLayoutPointerMove(e, dragState.id)}
-                    onPointerUp={(e) => dragState && handleLayoutPointerUp(e, layoutItems.find(i => i.id === dragState.id))}
-                    onPointerLeave={(e) => dragState && handleLayoutPointerUp(e, layoutItems.find(i => i.id === dragState.id))}
-                  >
-                      {/* Grid Background Layer */}
-                      <div className="absolute inset-0 min-w-[1200px] min-h-[800px] pointer-events-none" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '24px 24px' }}></div>
-                      
-                      {/* Items Layer */}
-                      <div className="absolute inset-0 min-w-[1200px] min-h-[800px]">
+                  <div className="flex-1 overflow-auto bg-slate-200 relative touch-none">
+                      <div 
+                          className="absolute origin-top-left"
+                          style={{ 
+                              transform: `scale(${layoutScale})`, 
+                              width: '2000px', 
+                              height: '1500px',
+                              backgroundImage: 'radial-gradient(#cbd5e1 1.5px, transparent 1.5px)', 
+                              backgroundSize: '30px 30px',
+                              backgroundColor: '#f8fafc'
+                          }}
+                          onPointerMove={handleLayoutPointerMove}
+                          onPointerUp={handleLayoutPointerUp}
+                          onPointerLeave={handleLayoutPointerUp}
+                      >
                           {layoutItems.map(item => {
                               const currentX = localLayouts[item.id]?.x ?? item.x;
                               const currentY = localLayouts[item.id]?.y ?? item.y;
@@ -1936,7 +1949,7 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className={`text-xl font-bold ${SysConfig.textClass} flex items-center gap-2`}>
-                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯計畫') : (isLab ? '新增版次' : '建立年度清單'))}
+                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯清單') : (isLab ? '新增版次' : '建立年度清單'))}
                 {modalType === 'table' && (editItem ? '編輯表單名稱' : '新增表單')}
                 {modalType === 'item' && (editItem ? (isLab ? '編輯設備' : '編輯財產') : (isLab ? '新增設備' : '新增財產'))}
                 {modalType === 'category' && (editItem ? '編輯分類' : '新增分類')}
