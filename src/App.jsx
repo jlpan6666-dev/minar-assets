@@ -363,6 +363,7 @@ export default function App() {
   const [localLayouts, setLocalLayouts] = useState({});
   const [layoutForm, setLayoutForm] = useState({ label: '' });
   const [layoutScale, setLayoutScale] = useState(1); 
+  const [resizeState, setResizeState] = useState(null); // 🟢 追蹤走道縮放狀態
   
   const mapContainerRef = useRef(null);
   const pointerCache = useRef({});
@@ -1149,7 +1150,7 @@ export default function App() {
           const p2 = pointerCache.current[pointerIds[1]];
           pinchStartRef.current = Math.hypot(p1.x - p2.x, p1.y - p2.y);
           setCanvasDrag(null); 
-      } else if (pointerIds.length === 1) {
+      } else if (pointerIds.length === 1 && !resizeState) {
           setCanvasDrag({
               startX: e.clientX,
               startY: e.clientY,
@@ -1195,7 +1196,7 @@ export default function App() {
               
               pinchStartRef.current = currentDist;
           }
-      } else if (pointerIds.length === 1 && canvasDrag) {
+      } else if (pointerIds.length === 1 && canvasDrag && !resizeState) {
           const dx = e.clientX - canvasDrag.startX;
           const dy = e.clientY - canvasDrag.startY;
           setCanvasPan({
@@ -1266,6 +1267,13 @@ export default function App() {
           label: typeLabels[type] || '設備',
           createdAt: serverTimestamp()
       };
+
+      // 🟢 如果是走道，賦予預設的長寬
+      if (type === 'aisle') {
+          newItem.width = 160;
+          newItem.height = 80;
+      }
+
       try {
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'), newItem);
           showToast("新增配置成功");
@@ -1283,7 +1291,7 @@ export default function App() {
       if (dragState && dragState.id === itemId) {
           const dx = (e.clientX - dragState.startX) / layoutScale;
           const dy = (e.clientY - dragState.startY) / layoutScale;
-          setLocalLayouts(prev => ({ ...prev, [itemId]: { x: Math.max(0, dragState.initX + dx), y: Math.max(0, dragState.initY + dy) } }));
+          setLocalLayouts(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), x: Math.max(0, dragState.initX + dx), y: Math.max(0, dragState.initY + dy) } }));
       }
   };
 
@@ -1303,6 +1311,56 @@ export default function App() {
 
           try {
               await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', item.id), { x: finalX, y: finalY });
+          } catch(err) { console.error(err); }
+      }
+  };
+
+  // 🟢 走道拉伸變形邏輯 (Resize handlers)
+  const handleResizePointerDown = (e, item) => {
+      e.stopPropagation();
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setResizeState({
+          id: item.id,
+          startX: e.clientX,
+          startY: e.clientY,
+          initW: item.width || 160,
+          initH: item.height || 80
+      });
+  };
+
+  const handleResizePointerMove = (e, itemId) => {
+      e.stopPropagation();
+      if (resizeState && resizeState.id === itemId) {
+          const dx = (e.clientX - resizeState.startX) / layoutScale;
+          const dy = (e.clientY - resizeState.startY) / layoutScale;
+          setLocalLayouts(prev => ({
+              ...prev,
+              [itemId]: {
+                  ...(prev[itemId] || {}),
+                  width: Math.max(60, resizeState.initW + dx),
+                  height: Math.max(60, resizeState.initH + dy)
+              }
+          }));
+      }
+  };
+
+  const handleResizePointerUp = async (e, item) => {
+      e.stopPropagation();
+      if (resizeState && resizeState.id === item.id) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          const finalW = localLayouts[item.id]?.width ?? resizeState.initW;
+          const finalH = localLayouts[item.id]?.height ?? resizeState.initH;
+          setResizeState(null);
+          
+          setLocalLayouts(prev => {
+              const next = {...prev};
+              delete next[item.id];
+              return next;
+          });
+
+          try {
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', item.id), { width: finalW, height: finalH });
           } catch(err) { console.error(err); }
       }
   };
@@ -1331,13 +1389,13 @@ export default function App() {
       } catch(e) { showToast("更新失敗", "error"); }
   };
 
-  const renderLayoutIcon = (type) => {
+  const renderLayoutIcon = (type, w, h) => {
       if (type === 'computer') return <Monitor className="w-12 h-12 text-slate-700" />;
       if (type === 'server') return <Server className="w-12 h-12 text-slate-700" />;
       if (type === 'printer') return <Printer className="w-12 h-12 text-slate-700" />;
       if (type === 'desk') return <div className="w-16 h-12 border-2 border-slate-400 bg-slate-100 rounded-sm"></div>;
-      // 🟢 走道圖塊
-      if (type === 'aisle') return <div className="w-40 h-16 border-2 border-dashed border-slate-400/70 bg-slate-200/50 rounded flex items-center justify-center"><GripHorizontal className="w-6 h-6 text-slate-400/50"/></div>;
+      // 🟢 若為走道，自動套用動態寬高
+      if (type === 'aisle') return <div style={{ width: Math.max(60, w), height: Math.max(60, h) }} className="border-2 border-dashed border-slate-400/50 bg-slate-300/30 rounded flex items-center justify-center relative"></div>;
       return <Box className="w-12 h-12 text-slate-700" />;
   };
 
@@ -1381,8 +1439,13 @@ export default function App() {
 
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 w-64 bg-slate-900 text-slate-100 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
-        <div className={`p-6 ${SysConfig.colorClass}`}>
+        <div className={`p-6 ${SysConfig.colorClass} flex items-center justify-between`}>
           <h1 className="text-lg font-bold flex items-center gap-2"><SysConfig.icon className="w-5 h-5"/> {SysConfig.name}</h1>
+          <div className="flex items-center gap-1">
+             {/* 🟢 密碼修改與登出按鈕移至此處 */}
+             <button onClick={() => setIsPwdModalOpen(true)} title="更改密碼" className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Key className="w-4 h-4"/></button>
+             <button onClick={handleLogout} title="登出系統" className="p-1.5 text-white/80 hover:text-rose-200 hover:bg-white/20 rounded-md transition-colors"><LogOut className="w-4 h-4"/></button>
+          </div>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <button onClick={() => { setViewMode('dashboard'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'dashboard' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Home className="w-5 h-5" /> 首頁概覽</button>
@@ -1986,7 +2049,13 @@ export default function App() {
                           {layoutItems.map(item => {
                               const currentX = localLayouts[item.id]?.x ?? item.x;
                               const currentY = localLayouts[item.id]?.y ?? item.y;
+                              const currentW = localLayouts[item.id]?.width ?? item.width ?? 160;
+                              const currentH = localLayouts[item.id]?.height ?? item.height ?? 80;
+                              
                               const isDragging = dragState?.id === item.id;
+                              const isResizing = resizeState?.id === item.id;
+                              const isAisle = item.type === 'aisle';
+
                               return (
                                   <div 
                                       key={item.id}
@@ -1996,18 +2065,35 @@ export default function App() {
                                       onPointerCancel={(e) => handleLayoutPointerUp(e, item)}
                                       onDoubleClick={(e) => { e.stopPropagation(); openLayoutEditModal(item); }}
                                       style={{ transform: `translate(${currentX}px, ${currentY}px)` }}
-                                      className={`absolute top-0 left-0 p-4 bg-white/90 backdrop-blur-sm border-2 rounded-xl shadow-md flex flex-col items-center justify-center select-none group transition-shadow ${isDragging ? 'cursor-grabbing border-teal-500 shadow-xl ring-4 ring-teal-500/20 z-50 scale-105' : 'cursor-grab border-slate-300 hover:border-teal-400 z-10 hover:z-40 hover:shadow-lg'}`}
+                                      className={isAisle 
+                                          ? `absolute top-0 left-0 p-2 bg-slate-200/40 backdrop-blur-sm border-2 rounded-xl flex flex-col items-center justify-center select-none group transition-shadow ${isDragging || isResizing ? 'cursor-grabbing border-teal-500 shadow-xl ring-2 ring-teal-500/50 z-50' : 'cursor-grab border-transparent hover:border-teal-400 z-0 hover:z-40'}` 
+                                          : `absolute top-0 left-0 p-4 bg-white/90 backdrop-blur-sm border-2 rounded-xl shadow-md flex flex-col items-center justify-center select-none group transition-shadow ${isDragging ? 'cursor-grabbing border-teal-500 shadow-xl ring-4 ring-teal-500/20 z-50 scale-105' : 'cursor-grab border-slate-300 hover:border-teal-400 z-10 hover:z-40 hover:shadow-lg'}`
+                                      }
                                   >
-                                      {renderLayoutIcon(item.type)}
-                                      <span className="text-sm font-bold mt-2 text-slate-700 pointer-events-none max-w-[120px] truncate px-1.5 bg-slate-100 rounded">{item.label}</span>
+                                      {renderLayoutIcon(item.type, currentW, currentH)}
+                                      <span className={`font-bold mt-2 text-slate-700 pointer-events-none truncate bg-slate-100 rounded ${isAisle ? 'text-xs px-2 max-w-full absolute opacity-50 bg-transparent' : 'text-sm px-1.5 max-w-[120px]'}`}>{item.label}</span>
                                       
                                       <button 
                                         onPointerDown={(e) => { e.stopPropagation(); handleDeleteLayoutItem(item.id); }} 
-                                        className="absolute -top-3 -right-3 bg-rose-500 text-white rounded-full p-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity hover:scale-110 shadow-sm"
+                                        className="absolute -top-3 -right-3 bg-rose-500 text-white rounded-full p-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity hover:scale-110 shadow-sm z-50"
                                         title="刪除設備"
                                       >
                                         <X className="w-4 h-4"/>
                                       </button>
+
+                                      {/* 🟢 走道專屬：右下角縮放拉柄 */}
+                                      {isAisle && (
+                                          <div 
+                                              onPointerDown={(e) => handleResizePointerDown(e, item)}
+                                              onPointerMove={(e) => handleResizePointerMove(e, item.id)}
+                                              onPointerUp={(e) => handleResizePointerUp(e, item)}
+                                              onPointerCancel={(e) => handleResizePointerUp(e, item)}
+                                              className={`absolute bottom-0 right-0 w-8 h-8 bg-teal-500 rounded-tl-xl rounded-br-lg cursor-se-resize flex items-center justify-center z-50 shadow-md transition-opacity ${isResizing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                                              style={{ touchAction: 'none' }}
+                                          >
+                                              <div className="w-2.5 h-2.5 border-b-2 border-r-2 border-white translate-x-[-2px] translate-y-[-2px]"></div>
+                                          </div>
+                                      )}
                                   </div>
                               );
                           })}
