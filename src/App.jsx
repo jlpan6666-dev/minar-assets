@@ -361,9 +361,9 @@ export default function App() {
   const [dragState, setDragState] = useState(null); 
   const [localLayouts, setLocalLayouts] = useState({});
   const [layoutForm, setLayoutForm] = useState({ label: '' });
-  const [layoutScale, setLayoutScale] = useState(1); // 🟢 縮放狀態
+  const [layoutScale, setLayoutScale] = useState(1); // 縮放狀態
   
-  // 🟢 新增：配置圖畫布的平移與拖曳狀態
+  // 🟢 畫布的平移與拖曳狀態
   const [canvasPan, setCanvasPan] = useState({ x: 0, y: 0 });
   const [canvasDrag, setCanvasDrag] = useState(null);
   
@@ -443,7 +443,7 @@ export default function App() {
     setSelectedItemIds([]);
     setIsActionMenuOpen(false);
     setLayoutScale(1);
-    setCanvasPan({ x: 0, y: 0 }); // 重置平移
+    setCanvasPan({ x: 0, y: 0 }); 
   }, [appMode]);
 
   // Reset Pagination & Selection when Filters/View Change
@@ -1077,7 +1077,7 @@ export default function App() {
   const handleAddLayoutItem = async (type) => {
       if (!currentSession) return;
       const typeLabels = { computer: '電腦', server: '伺服器', printer: '印表機', desk: '辦公桌' };
-      // 依據目前平移與縮放視角，將新設備放在畫面中央附近
+      
       const centerX = (-canvasPan.x + 100) / layoutScale;
       const centerY = (-canvasPan.y + 100) / layoutScale;
 
@@ -1096,7 +1096,7 @@ export default function App() {
   };
 
   const handleLayoutPointerDown = (e, item) => {
-      e.stopPropagation(); // 阻止事件冒泡到畫布，避免同時拖曳畫布
+      e.stopPropagation(); 
       e.currentTarget.setPointerCapture(e.pointerId);
       setDragState({ id: item.id, startX: e.clientX, startY: e.clientY, initX: item.x, initY: item.y });
   };
@@ -1742,7 +1742,7 @@ export default function App() {
 
           {/* 🟢 [NEW] Laboratory Layout View (LAB ONLY) */}
           {isLab && viewMode === 'layout' && currentSession && (
-              <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
+              <div className="flex flex-col w-full h-[calc(100dvh-140px)] min-h-[500px] bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
                   <div className="flex items-center gap-2 p-4 bg-slate-50 border-b border-slate-200 overflow-x-auto hide-scrollbar shrink-0">
                       <span className="text-sm font-bold text-slate-600 mr-2 whitespace-nowrap">新增設備模型：</span>
                       <button onClick={() => handleAddLayoutItem('computer')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Monitor className="w-4 h-4"/> 電腦</button>
@@ -1798,7 +1798,7 @@ export default function App() {
                                       
                                       <button 
                                         onPointerDown={(e) => { e.stopPropagation(); handleDeleteLayoutItem(item.id); }} 
-                                        className="absolute -top-3 -right-3 bg-rose-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110 shadow-sm"
+                                        className="absolute -top-3 -right-3 bg-rose-500 text-white rounded-full p-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity hover:scale-110 shadow-sm"
                                         title="刪除設備"
                                       >
                                         <X className="w-4 h-4"/>
