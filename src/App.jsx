@@ -1381,13 +1381,8 @@ export default function App() {
 
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 w-64 bg-slate-900 text-slate-100 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
-        <div className={`p-6 ${SysConfig.colorClass} flex items-center justify-between`}>
+        <div className={`p-6 ${SysConfig.colorClass}`}>
           <h1 className="text-lg font-bold flex items-center gap-2"><SysConfig.icon className="w-5 h-5"/> {SysConfig.name}</h1>
-          <div className="flex items-center gap-1">
-             {/* 🟢 密碼修改與登出按鈕移至此處 */}
-             <button onClick={() => setIsPwdModalOpen(true)} title="更改密碼" className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Key className="w-4 h-4"/></button>
-             <button onClick={handleLogout} title="登出系統" className="p-1.5 text-white/80 hover:text-rose-200 hover:bg-white/20 rounded-md transition-colors"><LogOut className="w-4 h-4"/></button>
-          </div>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <button onClick={() => { setViewMode('dashboard'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'dashboard' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Home className="w-5 h-5" /> 首頁概覽</button>
@@ -1434,6 +1429,11 @@ export default function App() {
           </div>
           
           <div className="flex gap-2 flex-shrink-0 items-center">
+            {/* 🟢 匯入按鈕限制所需用的 Input，確保安全保留於 DOM */}
+            {viewMode === 'items' && !isLab && currentTable && (
+              <input type="file" accept=".xlsx, .xls" ref={fileInputRef} className="hidden" onChange={(e) => { handleImportExcel(e); }} />
+            )}
+
             {viewMode === 'items' && (
               isSelectionMode ? (
                 <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
@@ -1450,31 +1450,41 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                <div className="relative">
-                  <button onClick={() => setIsActionMenuOpen(!isActionMenuOpen)} className="bg-white border border-slate-200 text-slate-700 p-2.5 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-sm transition-all active:scale-95" title="資料管理 (匯入/匯出)">
-                    <Settings className="w-4 h-4 text-slate-600"/>
-                  </button>
-                  {isActionMenuOpen && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setIsActionMenuOpen(false)}></div>
-                      <div className="absolute right-0 mt-2 w-44 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-200">
-                        <button onClick={() => { handleExportExcel(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出清單 Excel</button>
-                        {!isLab && currentTable && (
-                          <>
-                            <input type="file" accept=".xlsx, .xls" ref={fileInputRef} className="hidden" onChange={(e) => { handleImportExcel(e); setIsActionMenuOpen(false); }} />
-                            <button onClick={() => { fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel 資料</button>
-                          </>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
                 {(isLab || currentTable) && <button onClick={()=>openItemModal()} className={`text-white px-3 py-2.5 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>}
                 </>
               )
             )}
             {viewMode === 'sessions' && <button onClick={()=>openSessionModal()} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增清單</button>}
             {viewMode === 'categories' && <button onClick={()=>{setModalType('category');setEditItem(null);setCatForm({name:''});setIsModalOpen(true)}} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增分類</button>}
+
+            {/* 🟢 整合的齒輪管理選單 */}
+            <div className="relative ml-1 pl-2 border-l border-slate-200">
+              <button onClick={() => setIsActionMenuOpen(!isActionMenuOpen)} className="bg-white border border-slate-200 text-slate-700 p-2.5 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-sm transition-all active:scale-95" title="系統設定">
+                <Settings className="w-5 h-5 text-slate-600"/>
+              </button>
+              {isActionMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsActionMenuOpen(false)}></div>
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-200">
+                    
+                    {/* Excel 選項 (只有在資料列表頁面顯示) */}
+                    {viewMode === 'items' && !isSelectionMode && (
+                      <>
+                        <button onClick={() => { handleExportExcel(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出清單 Excel</button>
+                        {!isLab && currentTable && (
+                          <button onClick={() => { setIsActionMenuOpen(false); fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel 資料</button>
+                        )}
+                        <div className="h-px bg-slate-100 my-1 mx-2"></div>
+                      </>
+                    )}
+
+                    {/* 全域選項 */}
+                    <button onClick={() => { setIsPwdModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Key className="w-4 h-4 text-indigo-600"/> 更改系統密碼</button>
+                    <button onClick={() => { handleLogout(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 flex items-center gap-3 text-rose-600 font-bold transition-colors"><LogOut className="w-4 h-4"/> 登出系統</button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 
