@@ -363,6 +363,10 @@ export default function App() {
   const [layoutForm, setLayoutForm] = useState({ label: '' });
   const [layoutScale, setLayoutScale] = useState(1); // 🟢 縮放狀態
   
+  // 🟢 新增：配置圖畫布的平移與拖曳狀態
+  const [canvasPan, setCanvasPan] = useState({ x: 0, y: 0 });
+  const [canvasDrag, setCanvasDrag] = useState(null);
+  
   // Dashboard Stats
   const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, groupedActivity: [] });
 
@@ -439,6 +443,7 @@ export default function App() {
     setSelectedItemIds([]);
     setIsActionMenuOpen(false);
     setLayoutScale(1);
+    setCanvasPan({ x: 0, y: 0 }); // 重置平移
   }, [appMode]);
 
   // Reset Pagination & Selection when Filters/View Change
@@ -1039,15 +1044,48 @@ export default function App() {
     } catch (err) { showToast("操作失敗", "error"); }
   };
 
-  // 🟢 Layout Interaction Logic
+  // 🟢 畫布平移拖曳邏輯 (像 Google Maps)
+  const handleCanvasPointerDown = (e) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setCanvasDrag({
+          startX: e.clientX,
+          startY: e.clientY,
+          initX: canvasPan.x,
+          initY: canvasPan.y
+      });
+  };
+
+  const handleCanvasPointerMove = (e) => {
+      if (canvasDrag) {
+          const dx = e.clientX - canvasDrag.startX;
+          const dy = e.clientY - canvasDrag.startY;
+          setCanvasPan({
+              x: canvasDrag.initX + dx,
+              y: canvasDrag.initY + dy
+          });
+      }
+  };
+
+  const handleCanvasPointerUp = (e) => {
+      if (canvasDrag) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          setCanvasDrag(null);
+      }
+  };
+
+  // 🟢 設備模型拖曳邏輯
   const handleAddLayoutItem = async (type) => {
       if (!currentSession) return;
       const typeLabels = { computer: '電腦', server: '伺服器', printer: '印表機', desk: '辦公桌' };
+      // 依據目前平移與縮放視角，將新設備放在畫面中央附近
+      const centerX = (-canvasPan.x + 100) / layoutScale;
+      const centerY = (-canvasPan.y + 100) / layoutScale;
+
       const newItem = {
           sessionId: currentSession.id,
           type,
-          x: 50,
-          y: 50,
+          x: Math.max(50, centerX),
+          y: Math.max(50, centerY),
           label: typeLabels[type] || '設備',
           createdAt: serverTimestamp()
       };
@@ -1058,34 +1096,36 @@ export default function App() {
   };
 
   const handleLayoutPointerDown = (e, item) => {
-      e.stopPropagation();
-      e.preventDefault(); 
+      e.stopPropagation(); // 阻止事件冒泡到畫布，避免同時拖曳畫布
+      e.currentTarget.setPointerCapture(e.pointerId);
       setDragState({ id: item.id, startX: e.clientX, startY: e.clientY, initX: item.x, initY: item.y });
   };
 
-  const handleLayoutPointerMove = (e) => {
-      if (dragState) {
+  const handleLayoutPointerMove = (e, itemId) => {
+      e.stopPropagation();
+      if (dragState && dragState.id === itemId) {
           const dx = (e.clientX - dragState.startX) / layoutScale;
           const dy = (e.clientY - dragState.startY) / layoutScale;
-          setLocalLayouts(prev => ({ ...prev, [dragState.id]: { x: Math.max(0, dragState.initX + dx), y: Math.max(0, dragState.initY + dy) } }));
+          setLocalLayouts(prev => ({ ...prev, [itemId]: { x: Math.max(0, dragState.initX + dx), y: Math.max(0, dragState.initY + dy) } }));
       }
   };
 
-  const handleLayoutPointerUp = async () => {
-      if (dragState) {
-          const id = dragState.id;
-          const finalX = localLayouts[id]?.x ?? dragState.initX;
-          const finalY = localLayouts[id]?.y ?? dragState.initY;
+  const handleLayoutPointerUp = async (e, item) => {
+      e.stopPropagation();
+      if (dragState && dragState.id === item.id) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          const finalX = localLayouts[item.id]?.x ?? dragState.initX;
+          const finalY = localLayouts[item.id]?.y ?? dragState.initY;
           setDragState(null);
           
           setLocalLayouts(prev => {
               const next = {...prev};
-              delete next[id];
+              delete next[item.id];
               return next;
           });
 
           try {
-              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', id), { x: finalX, y: finalY });
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', item.id), { x: finalX, y: finalY });
           } catch(err) { console.error(err); }
       }
   };
@@ -1718,21 +1758,25 @@ export default function App() {
                       </div>
                   </div>
                   
-                  {/* Canvas Area */}
-                  <div className="flex-1 overflow-auto bg-slate-200 relative touch-none">
+                  {/* Canvas Area Container - 鎖定外層、處理畫布平移 */}
+                  <div 
+                      className={`flex-1 relative bg-slate-300 overflow-hidden touch-none ${canvasDrag ? 'cursor-grabbing' : 'cursor-grab'}`}
+                      onPointerDown={handleCanvasPointerDown}
+                      onPointerMove={handleCanvasPointerMove}
+                      onPointerUp={handleCanvasPointerUp}
+                      onPointerCancel={handleCanvasPointerUp}
+                  >
+                      {/* Inner Mappable Area */}
                       <div 
                           className="absolute origin-top-left"
                           style={{ 
-                              transform: `scale(${layoutScale})`, 
-                              width: '2000px', 
-                              height: '1500px',
+                              transform: `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${layoutScale})`, 
+                              width: '3000px', 
+                              height: '3000px',
                               backgroundImage: 'radial-gradient(#cbd5e1 1.5px, transparent 1.5px)', 
                               backgroundSize: '30px 30px',
                               backgroundColor: '#f8fafc'
                           }}
-                          onPointerMove={handleLayoutPointerMove}
-                          onPointerUp={handleLayoutPointerUp}
-                          onPointerLeave={handleLayoutPointerUp}
                       >
                           {layoutItems.map(item => {
                               const currentX = localLayouts[item.id]?.x ?? item.x;
@@ -1742,9 +1786,12 @@ export default function App() {
                                   <div 
                                       key={item.id}
                                       onPointerDown={(e) => handleLayoutPointerDown(e, item)}
+                                      onPointerMove={(e) => handleLayoutPointerMove(e, item.id)}
+                                      onPointerUp={(e) => handleLayoutPointerUp(e, item)}
+                                      onPointerCancel={(e) => handleLayoutPointerUp(e, item)}
                                       onDoubleClick={(e) => { e.stopPropagation(); openLayoutEditModal(item); }}
                                       style={{ transform: `translate(${currentX}px, ${currentY}px)` }}
-                                      className={`absolute top-0 left-0 p-4 bg-white/90 backdrop-blur-sm border-2 rounded-xl shadow-md cursor-grab flex flex-col items-center justify-center select-none group transition-shadow ${isDragging ? 'cursor-grabbing border-teal-500 shadow-xl ring-4 ring-teal-500/20 z-50 scale-105' : 'border-slate-300 hover:border-teal-400 z-10 hover:z-40 hover:shadow-lg'}`}
+                                      className={`absolute top-0 left-0 p-4 bg-white/90 backdrop-blur-sm border-2 rounded-xl shadow-md flex flex-col items-center justify-center select-none group transition-shadow ${isDragging ? 'cursor-grabbing border-teal-500 shadow-xl ring-4 ring-teal-500/20 z-50 scale-105' : 'cursor-grab border-slate-300 hover:border-teal-400 z-10 hover:z-40 hover:shadow-lg'}`}
                                   >
                                       {renderLayoutIcon(item.type)}
                                       <span className="text-sm font-bold mt-2 text-slate-700 pointer-events-none max-w-[120px] truncate px-1.5 bg-slate-100 rounded">{item.label}</span>
