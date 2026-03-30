@@ -30,7 +30,7 @@ import {
   History, UserCheck, Phone, Clock, FileDown, ArrowUpRight, ArrowDownLeft, 
   MousePointerClick, Sparkles, Timer, ShoppingCart, Minus, ArrowUpDown, 
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
-  FileSpreadsheet, Check, XCircle, ListChecks
+  FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer
 } from 'lucide-react';
 
 // ==========================================
@@ -280,7 +280,6 @@ const AuthScreen = ({ setAppMode }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
-      {/* Background decoration */}
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-200/30 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -349,6 +348,12 @@ export default function App() {
   const [categories, setCategories] = useState([]);
   const [loans, setLoans] = useState([]); 
   
+  // 🟢 實驗室配置圖 State
+  const [layoutItems, setLayoutItems] = useState([]);
+  const [dragState, setDragState] = useState(null); 
+  const [localLayouts, setLocalLayouts] = useState({});
+  const [layoutForm, setLayoutForm] = useState({ label: '' });
+  
   // Dashboard Stats
   const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, groupedActivity: [] });
 
@@ -359,7 +364,6 @@ export default function App() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all'); 
   const [sortOption, setSortOption] = useState('created_desc'); 
   
-  // 🟢 多重選取模式狀態
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState([]);
 
@@ -394,7 +398,6 @@ export default function App() {
   const [mobileBorrowTab, setMobileBorrowTab] = useState('equipment');
   const [fullScreenImage, setFullScreenImage] = useState(null); 
 
-  // 🟢 齒輪管理選單狀態
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
 
   // DB Path Helpers
@@ -465,6 +468,19 @@ export default function App() {
     });
     return () => unsubTables();
   }, [user, currentSession, isLab, colTablesName]);
+
+  // 🟢 Listener for Layout Items (Lab Only)
+  useEffect(() => {
+    if (!user || !currentSession || !isLab) {
+        setLayoutItems([]);
+        return;
+    }
+    const qLayouts = query(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'), where('sessionId', '==', currentSession.id));
+    const unsubLayouts = onSnapshot(qLayouts, snap => {
+        setLayoutItems(snap.docs.map(d => ({id: d.id, ...d.data()})));
+    });
+    return () => unsubLayouts();
+  }, [user, currentSession, isLab]);
 
   // Dashboard Logic
   useEffect(() => {
@@ -702,6 +718,14 @@ export default function App() {
               const tSnapshot = await getDocs(qTables);
               tSnapshot.forEach(d => batch.delete(d.ref));
           }
+          
+          // 🟢 Clear layout items
+          if (isLab) {
+              const qLayouts = query(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'), where('sessionId', '==', id));
+              const lSnapshot = await getDocs(qLayouts);
+              lSnapshot.forEach(d => batch.delete(d.ref));
+          }
+
           await batch.commit();
 
           setConfirmDialog(p => ({ ...p, isOpen: false }));
@@ -814,6 +838,16 @@ export default function App() {
                     batch.set(newRef, { ...data, sessionId: newSessionRef.id, borrowedCount: 0, updatedAt: serverTimestamp(), createdAt: serverTimestamp() });
                     countItems++;
                 });
+
+                // 🟢 Copy Layouts for Lab
+                const qLayouts = query(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'), where('sessionId', '==', latestSession.id));
+                const layoutsDocs = await getDocs(qLayouts);
+                layoutsDocs.forEach(docSnap => {
+                    const data = docSnap.data();
+                    const newRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'));
+                    batch.set(newRef, { ...data, sessionId: newSessionRef.id, createdAt: serverTimestamp() });
+                });
+
             } else {
                 const qOldTables = query(collection(db, 'artifacts', appId, 'public', 'data', colTablesName), where('sessionId', '==', latestSession.id));
                 const oldTablesSnap = await getDocs(qOldTables);
@@ -997,6 +1031,89 @@ export default function App() {
     } catch (err) { showToast("操作失敗", "error"); }
   };
 
+  // 🟢 實驗室配置圖拖曳邏輯
+  const handleAddLayoutItem = async (type) => {
+      if (!currentSession) return;
+      const typeLabels = { computer: '電腦', server: '伺服器', printer: '印表機', desk: '辦公桌' };
+      const newItem = {
+          sessionId: currentSession.id,
+          type,
+          x: 50,
+          y: 50,
+          label: typeLabels[type] || '設備',
+          createdAt: serverTimestamp()
+      };
+      try {
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'), newItem);
+          showToast("新增配置成功");
+      } catch (e) { showToast("新增失敗", "error"); }
+  };
+
+  const handleLayoutPointerDown = (e, item) => {
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setDragState({ id: item.id, startX: e.clientX, startY: e.clientY, initX: item.x, initY: item.y });
+  };
+
+  const handleLayoutPointerMove = (e, itemId) => {
+      if (dragState && dragState.id === itemId) {
+          const dx = e.clientX - dragState.startX;
+          const dy = e.clientY - dragState.startY;
+          setLocalLayouts(prev => ({ ...prev, [itemId]: { x: Math.max(0, dragState.initX + dx), y: Math.max(0, dragState.initY + dy) } }));
+      }
+  };
+
+  const handleLayoutPointerUp = async (e, item) => {
+      if (dragState && dragState.id === item.id) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          const finalX = localLayouts[item.id]?.x ?? dragState.initX;
+          const finalY = localLayouts[item.id]?.y ?? dragState.initY;
+          setDragState(null);
+          
+          setLocalLayouts(prev => {
+              const next = {...prev};
+              delete next[item.id];
+              return next;
+          });
+
+          try {
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', item.id), { x: finalX, y: finalY });
+          } catch(err) { console.error(err); }
+      }
+  };
+
+  const handleDeleteLayoutItem = async (id) => {
+      try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', id));
+          showToast("已刪除配置");
+      } catch(e) { showToast("刪除失敗", "error"); }
+  };
+
+  const openLayoutEditModal = (item) => {
+      setModalType('layoutItem');
+      setEditItem(item);
+      setLayoutForm({ label: item.label });
+      setIsModalOpen(true);
+  };
+
+  const handleSaveLayoutLabel = async (e) => {
+      e.preventDefault();
+      if (!editItem) return;
+      try {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', editItem.id), { label: layoutForm.label });
+          showToast("更新名稱成功");
+          setIsModalOpen(false);
+      } catch(e) { showToast("更新失敗", "error"); }
+  };
+
+  const renderLayoutIcon = (type) => {
+      if (type === 'computer') return <Monitor className="w-8 h-8 text-slate-700" />;
+      if (type === 'server') return <Server className="w-8 h-8 text-slate-700" />;
+      if (type === 'printer') return <Printer className="w-8 h-8 text-slate-700" />;
+      if (type === 'desk') return <div className="w-12 h-8 border-2 border-slate-400 bg-slate-100 rounded-sm"></div>;
+      return <Box className="w-8 h-8 text-slate-700" />;
+  };
+
   if (loading) return <div className="min-h-screen flex items-center justify-center text-teal-600 font-medium animate-pulse">系統環境載入中...</div>;
   if (!user || !appMode) return <AuthScreen setAppMode={setAppMode} />;
 
@@ -1035,6 +1152,8 @@ export default function App() {
                 <>
                 <button onClick={() => { setViewMode('borrow-request'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'borrow-request' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><ShoppingCart className="w-5 h-5" /> 借用登記</button>
                 <button onClick={() => { setViewMode('loans'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'loans' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><History className="w-5 h-5" /> 借還紀錄表</button>
+                {/* 🟢 新增：實驗室配置圖選項 */}
+                <button onClick={() => { setViewMode('layout'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'layout' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><Map className="w-5 h-5" /> 實驗室配置圖</button>
                 </>
               )}
             </div>
@@ -1057,6 +1176,7 @@ export default function App() {
                     {currentSession && viewMode === 'items' && currentSession.name}
                     {currentSession && viewMode === 'borrow-request' && `${currentSession.name} - 借用登記`}
                     {currentSession && viewMode === 'loans' && `${currentSession.name} - 借還紀錄`}
+                    {currentSession && viewMode === 'layout' && `${currentSession.name} - 實驗室配置圖`}
                   </h2>
                   {currentSession && viewMode !== 'dashboard' && viewMode !== 'sessions' && viewMode !== 'categories' && (
                     <p className="text-xs text-slate-500 flex items-center gap-1 truncate"><Clock className="w-3 h-3"/> 建立: {currentSession.date}</p>
@@ -1065,7 +1185,6 @@ export default function App() {
              </div>
           </div>
           
-          {/* 🟢 Header Actions */}
           <div className="flex gap-2 flex-shrink-0 items-center">
             {viewMode === 'items' && (
               isSelectionMode ? (
@@ -1083,39 +1202,26 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                {/* 🟢 齒輪選單：匯出/匯入 Excel */}
                 <div className="relative">
-                  <button 
-                    onClick={() => setIsActionMenuOpen(!isActionMenuOpen)}
-                    className="bg-white border border-slate-200 text-slate-700 p-2.5 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-sm transition-all active:scale-95"
-                    title="資料管理 (匯入/匯出)"
-                  >
+                  <button onClick={() => setIsActionMenuOpen(!isActionMenuOpen)} className="bg-white border border-slate-200 text-slate-700 p-2.5 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-sm transition-all active:scale-95" title="資料管理 (匯入/匯出)">
                     <Settings className="w-4 h-4 text-slate-600"/>
                   </button>
-                  
                   {isActionMenuOpen && (
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setIsActionMenuOpen(false)}></div>
                       <div className="absolute right-0 mt-2 w-44 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-200">
-                        <button onClick={() => { handleExportExcel(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors">
-                          <FileDown className="w-4 h-4 text-emerald-600"/> 匯出清單 Excel
-                        </button>
+                        <button onClick={() => { handleExportExcel(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出清單 Excel</button>
                         {!isLab && currentTable && (
                           <>
                             <input type="file" accept=".xlsx, .xls" ref={fileInputRef} className="hidden" onChange={(e) => { handleImportExcel(e); setIsActionMenuOpen(false); }} />
-                            <button onClick={() => { fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors">
-                              <FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel 資料
-                            </button>
+                            <button onClick={() => { fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel 資料</button>
                           </>
                         )}
                       </div>
                     </>
                   )}
                 </div>
-
-                {(isLab || currentTable) && (
-                  <button onClick={()=>openItemModal()} className={`text-white px-3 py-2.5 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>
-                )}
+                {(isLab || currentTable) && <button onClick={()=>openItemModal()} className={`text-white px-3 py-2.5 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>}
                 </>
               )
             )}
@@ -1253,8 +1359,6 @@ export default function App() {
                       <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
                     </div>
                     <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 items-center hide-scrollbar">
-                        
-                        {/* Date Filter */}
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                                 <Calendar className={`w-4 h-4 ${searchDate ? SysConfig.textClass : 'text-slate-500'}`} />
@@ -1262,74 +1366,38 @@ export default function App() {
                             </div>
                             {searchDate && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchDate} <button onClick={()=>setSearchDate('')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
                         </div>
-                        
-                        {/* Lab Category Filter */}
                         {isLab && (
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                                 <Filter className={`w-4 h-4 ${selectedCategoryFilter !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類">
-                                  <option value="all">所有分類</option>
-                                  {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
+                                <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類"><option value="all">所有分類</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
                             </div>
                             {selectedCategoryFilter !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{categories.find(c => c.id === selectedCategoryFilter)?.name} <button onClick={()=>setSelectedCategoryFilter('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
                         </div>
                         )}
-
-                        {/* Property Status Filter */}
                         {!isLab && (
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                                 <CheckSquare className={`w-4 h-4 ${searchStatus !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀況">
-                                  <option value="all">全部狀況</option>
-                                  <option value="未盤點">未盤點</option>
-                                  <option value="已盤點">已盤點</option>
-                                </select>
+                                <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀況"><option value="all">全部狀況</option><option value="未盤點">未盤點</option><option value="已盤點">已盤點</option></select>
                             </div>
                             {searchStatus !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchStatus} <button onClick={()=>setSearchStatus('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
                         </div>
                         )}
-
-                        {/* Sort Options */}
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                                 <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'created_desc' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式">
-                                    <option value="created_desc" hidden>預設(最新)</option>
-                                    <option value="name">名稱排序</option>
-                                    {isLab && <option value="quantity_desc">數量 (多→少)</option>}
-                                    {isLab && <option value="quantity_asc">數量 (少→多)</option>}
-                                    {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
-                                    {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
-                                </select>
+                                <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式"><option value="created_desc" hidden>預設(最新)</option><option value="name">名稱排序</option>{isLab && <option value="quantity_desc">數量 (多→少)</option>}{isLab && <option value="quantity_asc">數量 (少→多)</option>}{!isLab && <option value="propId_asc">財產編號 (小→大)</option>}{!isLab && <option value="propId_desc">財產編號 (大→小)</option>}</select>
                             </div>
                             {sortOption !== 'created_desc' && (
                                <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>
-                                 {sortOption === 'name' && '名稱排序'}
-                                 {sortOption === 'quantity_desc' && '數量 (多→少)'}
-                                 {sortOption === 'quantity_asc' && '數量 (少→多)'}
-                                 {sortOption === 'propId_asc' && '編號 (小→大)'}
-                                 {sortOption === 'propId_desc' && '編號 (大→小)'}
+                                 {sortOption === 'name' && '名稱排序'}{sortOption === 'quantity_desc' && '數量 (多→少)'}{sortOption === 'quantity_asc' && '數量 (少→多)'}{sortOption === 'propId_asc' && '編號 (小→大)'}{sortOption === 'propId_desc' && '編號 (大→小)'}
                                  <button onClick={()=>setSortOption('created_desc')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
                                </div>
                             )}
                         </div>
-
-                        {/* 🟢 選取按鈕移至排序旁邊 */}
                         <div className="flex items-center gap-1 flex-shrink-0 border-l border-slate-200 pl-2 ml-1">
-                            <button 
-                              onClick={() => {
-                                if (isSelectionMode) {
-                                  setIsSelectionMode(false);
-                                  setSelectedItemIds([]);
-                                } else {
-                                  setIsSelectionMode(true);
-                                }
-                              }} 
-                              className={`flex items-center justify-center px-3 py-2 border rounded-lg transition-colors cursor-pointer gap-1.5 shadow-sm text-sm font-bold ${isSelectionMode ? `bg-${themeColor}-50 border-${themeColor}-300 ${SysConfig.textClass}` : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-                            >
+                            <button onClick={() => { if (isSelectionMode) { setIsSelectionMode(false); setSelectedItemIds([]); } else { setIsSelectionMode(true); } }} className={`flex items-center justify-center px-3 py-2 border rounded-lg transition-colors cursor-pointer gap-1.5 shadow-sm text-sm font-bold ${isSelectionMode ? `bg-${themeColor}-50 border-${themeColor}-300 ${SysConfig.textClass}` : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
                               <ListChecks className={`w-4 h-4 ${isSelectionMode ? SysConfig.textClass : 'text-slate-500'}`} />
                               <span className="hidden sm:inline">{isSelectionMode ? '取消選取' : '多重選取'}</span>
                             </button>
@@ -1337,39 +1405,19 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 🟢 Mobile Card View (Paginated with Selection) */}
+                  {/* Mobile Card View */}
                   <div className="block md:hidden">
                     <div className="space-y-4">
                       {paginatedItems.map(item => {
                         const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
                         const isSelected = selectedItemIds.includes(item.id);
                         return (
-                          <div 
-                            key={item.id} 
-                            onClick={() => isSelectionMode && toggleSelection(item.id)}
-                            className={`bg-white rounded-xl shadow-sm border p-4 flex gap-3 relative transition-all ${isSelectionMode ? 'cursor-pointer hover:shadow-md' : ''} ${isSelectionMode && isSelected ? `border-${themeColor}-400 ring-1 ring-${themeColor}-400 bg-${themeColor}-50/30` : 'border-slate-200'}`}
-                          >
-                            {/* Checkbox for Selection Mode */}
-                            {isSelectionMode && (
-                              <div className="flex items-center justify-center pr-1" onClick={e => e.stopPropagation()}>
-                                <input 
-                                  type="checkbox" 
-                                  checked={isSelected} 
-                                  onChange={() => toggleSelection(item.id)} 
-                                  className="w-5 h-5 cursor-pointer accent-indigo-600 rounded" 
-                                />
-                              </div>
-                            )}
-
+                          <div key={item.id} onClick={() => isSelectionMode && toggleSelection(item.id)} className={`bg-white rounded-xl shadow-sm border p-4 flex gap-3 relative transition-all ${isSelectionMode ? 'cursor-pointer hover:shadow-md' : ''} ${isSelectionMode && isSelected ? `border-${themeColor}-400 ring-1 ring-${themeColor}-400 bg-${themeColor}-50/30` : 'border-slate-200'}`}>
+                            {isSelectionMode && <div className="flex items-center justify-center pr-1" onClick={e => e.stopPropagation()}><input type="checkbox" checked={isSelected} onChange={() => toggleSelection(item.id)} className="w-5 h-5 cursor-pointer accent-indigo-600 rounded" /></div>}
                             {item.imageUrl ? (
-                               <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100">
-                                 <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={(e) => { if(!isSelectionMode) { e.stopPropagation(); setFullScreenImage(item.imageUrl); } }} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
-                               </div>
+                               <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100"><img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={(e) => { if(!isSelectionMode) { e.stopPropagation(); setFullScreenImage(item.imageUrl); } }} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/></div>
                             ) : (
-                               <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
-                                 <ImageIcon className="w-5 h-5 mb-1"/>
-                                 <span className="text-[10px]">無照片</span>
-                               </div>
+                               <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100"><ImageIcon className="w-5 h-5 mb-1"/><span className="text-[10px]">無照片</span></div>
                             )}
                             <div className="flex-1 min-w-0">
                               <div className="flex justify-between items-start mb-1 gap-2">
@@ -1378,7 +1426,6 @@ export default function App() {
                                   <h3 className="font-bold text-base text-slate-800 truncate">{item.name}</h3>
                                 </div>
                               </div>
-                              
                               {!isLab && (
                                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-2 mb-2 text-[10px] text-slate-600 bg-slate-50 p-2 rounded-lg">
                                     <div className="truncate"><span className="text-slate-400">廠牌:</span> {item.brandModel || '-'}</div>
@@ -1388,48 +1435,17 @@ export default function App() {
                                     <div className="col-span-2 truncate"><span className="text-slate-400">備註:</span> {item.note || '-'}</div>
                                  </div>
                               )}
-
                               <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                                {isLab ? (
-                                    <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.categoryName}</span>
-                                ) : (
-                                    <>
-                                    {item.user && <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5"><UserCheck className="w-3 h-3"/>{item.user}</span>}
-                                    <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.location || '無地點'}</span>
-                                    </>
-                                )}
+                                {isLab ? <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.categoryName}</span> : <>{item.user && <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5"><UserCheck className="w-3 h-3"/>{item.user}</span>}<span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.location || '無地點'}</span></>}
                                 {item.addDate && isLab && <span className={`inline-block bg-opacity-10 text-[10px] px-1.5 py-0.5 rounded font-bold ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')} ${SysConfig.textClass}`}>{item.addDate}</span>}
                               </div>
                               {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5"/> 更新: {item.lastUpdatedStr}</div>}
-                              
-                              {/* Bottom Action Area (Hidden if Selection Mode) */}
                               {!isSelectionMode && (
                                 <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between gap-2">
                                   {isLab ? (
-                                      <>
-                                      <div className="flex gap-2 text-xs text-slate-600 font-mono">
-                                          <span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span>
-                                      </div>
-                                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                                          <div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
-                                            <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
-                                            <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
-                                          </div>
-                                          <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}>
-                                            <Plus className="w-3 h-3"/> 借用
-                                          </button>
-                                      </div>
-                                      </>
+                                      <><div className="flex gap-2 text-xs text-slate-600 font-mono"><span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span></div><div className="flex items-center gap-1.5 flex-shrink-0"><div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5"><button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button><button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button></div><button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}><Plus className="w-3 h-3"/> 借用</button></div></>
                                   ) : (
-                                      <>
-                                      <button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
-                                          {item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}
-                                      </button>
-                                      <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
-                                        <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
-                                        <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
-                                      </div>
-                                      </>
+                                      <><button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>{item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}</button><div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5"><button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button><button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button></div></>
                                   )}
                                 </div>
                               )}
@@ -1442,41 +1458,20 @@ export default function App() {
                     <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                   </div>
 
-                  {/* 🟢 Desktop Table View (Paginated with Selection) */}
+                  {/* Desktop Table View */}
                   <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 sticky top-0 z-10 shadow-sm">
                             <tr>
-                            {/* Master Checkbox Header */}
                             {isSelectionMode && (
-                              <th className="p-3 w-12 text-center align-middle">
-                                <input 
-                                  type="checkbox" 
-                                  className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" 
-                                  checked={filteredItems.length > 0 && selectedItemIds.length === filteredItems.length} 
-                                  onChange={handleSelectAll} 
-                                  title="全選目前篩選資料"
-                                />
-                              </th>
+                              <th className="p-3 w-12 text-center align-middle"><input type="checkbox" className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" checked={filteredItems.length > 0 && selectedItemIds.length === filteredItems.length} onChange={handleSelectAll} title="全選目前篩選資料"/></th>
                             )}
                             <th className="p-3 w-14 text-center">圖</th>
                             {isLab ? (
-                                <>
-                                <th className="p-3 font-semibold w-1/4">設備資訊</th>
-                                <th className="p-3 font-semibold w-1/4">分類 / 日期</th>
-                                <th className="p-3 font-semibold w-1/4">庫存狀態</th>
-                                <th className="p-3 font-semibold text-right w-1/4">操作</th>
-                                </>
+                                <><th className="p-3 font-semibold w-1/4">設備資訊</th><th className="p-3 font-semibold w-1/4">分類 / 日期</th><th className="p-3 font-semibold w-1/4">庫存狀態</th><th className="p-3 font-semibold text-right w-1/4">操作</th></>
                             ) : (
-                                <>
-                                <th className="p-3 font-semibold w-[20%]">財產編號 / 名稱</th>
-                                <th className="p-3 font-semibold w-[15%]">廠牌型別</th>
-                                <th className="p-3 font-semibold w-[15%]">使用人 / 存置地點</th>
-                                <th className="p-3 font-semibold w-[20%]">取得日期 / 現值 / 年限</th>
-                                <th className="p-3 font-semibold w-[10%] text-center">狀況</th>
-                                <th className="p-3 font-semibold text-right w-[15%]">操作</th>
-                                </>
+                                <><th className="p-3 font-semibold w-[20%]">財產編號 / 名稱</th><th className="p-3 font-semibold w-[15%]">廠牌型別</th><th className="p-3 font-semibold w-[15%]">使用人 / 存置地點</th><th className="p-3 font-semibold w-[20%]">取得日期 / 現值 / 年限</th><th className="p-3 font-semibold w-[10%] text-center">狀況</th><th className="p-3 font-semibold text-right w-[15%]">操作</th></>
                             )}
                             </tr>
                         </thead>
@@ -1485,102 +1480,41 @@ export default function App() {
                             const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
                             const isSelected = selectedItemIds.includes(item.id);
                             return (
-                                <tr 
-                                  key={item.id} 
-                                  onClick={() => isSelectionMode && toggleSelection(item.id)}
-                                  className={`transition-colors group ${isSelectionMode ? 'cursor-pointer' : ''} ${isSelected ? `bg-${themeColor}-50/60` : 'hover:bg-slate-50/50'}`}
-                                >
-                                {/* Individual Checkbox */}
+                                <tr key={item.id} onClick={() => isSelectionMode && toggleSelection(item.id)} className={`transition-colors group ${isSelectionMode ? 'cursor-pointer' : ''} ${isSelected ? `bg-${themeColor}-50/60` : 'hover:bg-slate-50/50'}`}>
                                 {isSelectionMode && (
-                                  <td className="p-3 text-center align-middle" onClick={e => e.stopPropagation()}>
-                                    <input 
-                                      type="checkbox" 
-                                      className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" 
-                                      checked={isSelected} 
-                                      onChange={() => toggleSelection(item.id)} 
-                                    />
-                                  </td>
+                                  <td className="p-3 text-center align-middle" onClick={e => e.stopPropagation()}><input type="checkbox" className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" checked={isSelected} onChange={() => toggleSelection(item.id)} /></td>
                                 )}
-
                                 <td className="p-3 text-center align-top pt-4">
                                     {item.imageUrl ? (
                                         <div onClick={(e) => { if(!isSelectionMode) { e.stopPropagation(); setFullScreenImage(item.imageUrl); } }} className={`inline-block w-10 h-10 rounded-lg overflow-hidden border border-slate-200 shadow-sm ${!isSelectionMode ? 'hover:scale-150 transition-transform origin-left cursor-pointer' : ''}`}>
                                             <img src={item.imageUrl} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
                                         </div>
                                     ) : (
-                                        <div className="w-10 h-10 mx-auto rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
-                                            <ImageIcon className="w-4 h-4 mb-0.5"/>
-                                            <span className="text-[8px] leading-none scale-90 font-bold">無照片</span>
-                                        </div>
+                                        <div className="w-10 h-10 mx-auto rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100"><ImageIcon className="w-4 h-4 mb-0.5"/><span className="text-[8px] leading-none scale-90 font-bold">無照片</span></div>
                                     )}
                                 </td>
                                 {isLab ? (
                                     <>
-                                    <td className="p-3 align-top">
-                                        <div className="font-bold text-slate-800">{item.name}</div>
-                                        <div className="text-xs text-slate-500 mt-1 max-w-[200px] truncate" title={item.note}>{item.note || '-'}</div>
-                                        {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
-                                    </td>
-                                    <td className="p-3 align-top">
-                                        <span className="inline-block bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs font-medium text-slate-600 mb-1">{item.categoryName}</span>
-                                        {item.addDate && <div className={`text-[10px] font-bold mt-1 ${SysConfig.textClass}`}>加入: {item.addDate}</div>}
-                                    </td>
-                                    <td className="p-3 align-top">
-                                        <div className="flex items-center gap-2">
-                                        <span className="font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-xs">總 {item.quantity}</span>
-                                        <span className="font-mono text-orange-600 bg-orange-50 px-2 py-0.5 rounded text-xs">借 {item.borrowedCount || 0}</span>
-                                        <span className={`font-mono px-2 py-0.5 rounded text-xs font-bold ${available === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'}`}>剩 {available}</span>
-                                        </div>
-                                    </td>
+                                    <td className="p-3 align-top"><div className="font-bold text-slate-800">{item.name}</div><div className="text-xs text-slate-500 mt-1 max-w-[200px] truncate" title={item.note}>{item.note || '-'}</div>{item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}</td>
+                                    <td className="p-3 align-top"><span className="inline-block bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs font-medium text-slate-600 mb-1">{item.categoryName}</span>{item.addDate && <div className={`text-[10px] font-bold mt-1 ${SysConfig.textClass}`}>加入: {item.addDate}</div>}</td>
+                                    <td className="p-3 align-top"><div className="flex items-center gap-2"><span className="font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-xs">總 {item.quantity}</span><span className="font-mono text-orange-600 bg-orange-50 px-2 py-0.5 rounded text-xs">借 {item.borrowedCount || 0}</span><span className={`font-mono px-2 py-0.5 rounded text-xs font-bold ${available === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'}`}>剩 {available}</span></div></td>
                                     <td className="p-3 text-right align-top">
                                         {!isSelectionMode && (
-                                            <div className="flex justify-end gap-1.5">
-                                            <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : SysConfig.colorClass}`}>
-                                                <Plus className="w-3.5 h-3.5"/> 借用
-                                            </button>
-                                            <button onClick={()=>openItemModal(item)} className="p-1.5 text-slate-400 hover:text-teal-600 bg-transparent hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4"/></button>
-                                            <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
-                                            </div>
+                                            <div className="flex justify-end gap-1.5"><button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : SysConfig.colorClass}`}><Plus className="w-3.5 h-3.5"/> 借用</button><button onClick={()=>openItemModal(item)} className="p-1.5 text-slate-400 hover:text-teal-600 bg-transparent hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4"/></button><button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button></div>
                                         )}
                                     </td>
                                     </>
                                 ) : (
                                     <>
-                                    <td className="p-3 align-top">
-                                        <div className={`font-mono font-bold text-sm tracking-wider mb-1 ${SysConfig.textClass}`}>{item.propId || '無編號'}</div>
-                                        <div className="font-bold text-slate-800 text-sm">{item.name}</div>
-                                        {item.lastUpdatedStr && <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
-                                    </td>
-                                    <td className="p-3 align-top text-xs text-slate-600">
-                                        {item.brandModel || '-'}
-                                    </td>
-                                    <td className="p-3 align-top">
-                                        <div className="text-sm font-medium text-slate-700 flex items-center gap-1"><UserCheck className="w-3.5 h-3.5 text-slate-400"/> {item.user || '-'}</div>
-                                        <div className="text-xs text-slate-500 mt-1">{item.location || '-'}</div>
-                                    </td>
-                                    <td className="p-3 align-top text-xs text-slate-600 space-y-1">
-                                        <div><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div>
-                                        <div><span className="text-slate-400">現值:</span> <span className="font-mono">${item.value || 0}</span></div>
-                                        <div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
-                                    </td>
+                                    <td className="p-3 align-top"><div className={`font-mono font-bold text-sm tracking-wider mb-1 ${SysConfig.textClass}`}>{item.propId || '無編號'}</div><div className="font-bold text-slate-800 text-sm">{item.name}</div>{item.lastUpdatedStr && <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}</td>
+                                    <td className="p-3 align-top text-xs text-slate-600">{item.brandModel || '-'}</td>
+                                    <td className="p-3 align-top"><div className="text-sm font-medium text-slate-700 flex items-center gap-1"><UserCheck className="w-3.5 h-3.5 text-slate-400"/> {item.user || '-'}</div><div className="text-xs text-slate-500 mt-1">{item.location || '-'}</div></td>
+                                    <td className="p-3 align-top text-xs text-slate-600 space-y-1"><div><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div><div><span className="text-slate-400">現值:</span> <span className="font-mono">${item.value || 0}</span></div><div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div></td>
                                     <td className="p-3 align-top text-center">
-                                        {!isSelectionMode ? (
-                                            <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">
-                                                {item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}
-                                            </button>
-                                        ) : (
-                                            <span className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
-                                                {item.status}
-                                            </span>
-                                        )}
+                                        {!isSelectionMode ? <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">{item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}</button> : <span className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>{item.status}</span>}
                                     </td>
                                     <td className="p-3 text-right align-top">
-                                        {!isSelectionMode && (
-                                            <div className="flex justify-end gap-1">
-                                            <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button>
-                                            <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
-                                            </div>
-                                        )}
+                                        {!isSelectionMode && <div className="flex justify-end gap-1"><button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button><button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button></div>}
                                     </td>
                                     </>
                                 )}
@@ -1596,6 +1530,60 @@ export default function App() {
                 </>
               )}
             </div>
+          )}
+
+          {/* 🟢 [NEW] Laboratory Layout View (LAB ONLY) */}
+          {isLab && viewMode === 'layout' && currentSession && (
+              <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
+                  <div className="flex items-center gap-2 p-4 bg-slate-50 border-b border-slate-200 overflow-x-auto hide-scrollbar shrink-0">
+                      <span className="text-sm font-bold text-slate-600 mr-2 whitespace-nowrap">新增設備模型：</span>
+                      <button onClick={() => handleAddLayoutItem('computer')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Monitor className="w-4 h-4"/> 電腦</button>
+                      <button onClick={() => handleAddLayoutItem('server')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Server className="w-4 h-4"/> 伺服器</button>
+                      <button onClick={() => handleAddLayoutItem('printer')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Printer className="w-4 h-4"/> 印表機</button>
+                      <button onClick={() => handleAddLayoutItem('desk')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Box className="w-4 h-4"/> 辦公桌</button>
+                      <div className="ml-auto text-xs text-slate-400 font-medium whitespace-nowrap flex items-center gap-1"><MousePointerClick className="w-3 h-3"/> 直接拖曳移動，雙擊編輯名稱</div>
+                  </div>
+                  
+                  {/* Canvas Area */}
+                  <div 
+                    className="flex-1 relative bg-slate-100 overflow-auto cursor-crosshair touch-none"
+                    onPointerMove={(e) => dragState && handleLayoutPointerMove(e, dragState.id)}
+                    onPointerUp={(e) => dragState && handleLayoutPointerUp(e, layoutItems.find(i => i.id === dragState.id))}
+                    onPointerLeave={(e) => dragState && handleLayoutPointerUp(e, layoutItems.find(i => i.id === dragState.id))}
+                  >
+                      {/* Grid Background Layer */}
+                      <div className="absolute inset-0 min-w-[1200px] min-h-[800px] pointer-events-none" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '24px 24px' }}></div>
+                      
+                      {/* Items Layer */}
+                      <div className="absolute inset-0 min-w-[1200px] min-h-[800px]">
+                          {layoutItems.map(item => {
+                              const currentX = localLayouts[item.id]?.x ?? item.x;
+                              const currentY = localLayouts[item.id]?.y ?? item.y;
+                              const isDragging = dragState?.id === item.id;
+                              return (
+                                  <div 
+                                      key={item.id}
+                                      onPointerDown={(e) => handleLayoutPointerDown(e, item)}
+                                      onDoubleClick={(e) => { e.stopPropagation(); openLayoutEditModal(item); }}
+                                      style={{ transform: `translate(${currentX}px, ${currentY}px)` }}
+                                      className={`absolute top-0 left-0 p-3 bg-white/90 backdrop-blur-sm border-2 rounded-xl shadow-md cursor-grab flex flex-col items-center justify-center select-none group transition-shadow ${isDragging ? 'cursor-grabbing border-teal-500 shadow-xl ring-4 ring-teal-500/20 z-50 scale-105' : 'border-slate-300 hover:border-teal-400 z-10 hover:z-40 hover:shadow-lg'}`}
+                                  >
+                                      {renderLayoutIcon(item.type)}
+                                      <span className="text-[10px] font-bold mt-1.5 text-slate-700 pointer-events-none max-w-[80px] truncate px-1 bg-slate-100 rounded">{item.label}</span>
+                                      
+                                      <button 
+                                        onPointerDown={(e) => { e.stopPropagation(); handleDeleteLayoutItem(item.id); }} 
+                                        className="absolute -top-2.5 -right-2.5 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110 shadow-sm"
+                                        title="刪除設備"
+                                      >
+                                        <X className="w-3.5 h-3.5"/>
+                                      </button>
+                                  </div>
+                              );
+                          })}
+                      </div>
+                  </div>
+              </div>
           )}
 
           {/* 🟡 [PAGINATED] Borrow Request View (LAB ONLY) */}
@@ -1787,6 +1775,7 @@ export default function App() {
                 {modalType === 'table' && (editItem ? '編輯表單名稱' : '新增表單')}
                 {modalType === 'item' && (editItem ? (isLab ? '編輯設備' : '編輯財產') : (isLab ? '新增設備' : '新增財產'))}
                 {modalType === 'category' && (editItem ? '編輯分類' : '新增分類')}
+                {modalType === 'layoutItem' && '編輯配置名稱'}
               </h3>
               <button onClick={()=>setIsModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"><X className="w-6 h-6"/></button>
             </div>
@@ -1922,6 +1911,17 @@ export default function App() {
               <form onSubmit={handleSaveCategory} className="space-y-4">
                 <div><label className="text-sm font-bold text-slate-700 mb-1 block">分類名稱</label><input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none text-sm" value={catForm.name} onChange={e=>setCatForm({...catForm, name:e.target.value})} required/></div>
                 <button type="submit" className="w-full bg-teal-600 text-white py-3 rounded-xl font-bold hover:bg-teal-700 transition-colors shadow-md mt-4">儲存分類</button>
+              </form>
+            )}
+
+            {/* 🟢 Layout Item Label Edit Form */}
+            {isLab && modalType === 'layoutItem' && (
+              <form onSubmit={handleSaveLayoutLabel} className="space-y-4">
+                <div>
+                  <label className="text-sm font-bold text-slate-700 mb-1 block">配置名稱</label>
+                  <input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none text-sm" value={layoutForm.label} onChange={e=>setLayoutForm({...layoutForm, label:e.target.value})} placeholder="例如: PC-01" required autoFocus/>
+                </div>
+                <button type="submit" className="w-full bg-teal-600 text-white py-3 rounded-xl font-bold hover:bg-teal-700 transition-colors shadow-md mt-4">儲存名稱</button>
               </form>
             )}
            </div>
