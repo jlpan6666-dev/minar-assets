@@ -20,7 +20,8 @@ import {
   orderBy,
   increment,
   writeBatch,
-  getDocs
+  getDocs,
+  setDoc
 } from 'firebase/firestore';
 
 import { 
@@ -30,7 +31,8 @@ import {
   History, UserCheck, Phone, Clock, FileDown, ArrowUpRight, ArrowDownLeft, 
   MousePointerClick, Sparkles, Timer, ShoppingCart, Minus, ArrowUpDown, 
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
-  FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut
+  FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut,
+  Key, GripHorizontal
 } from 'lucide-react';
 
 // ==========================================
@@ -264,26 +266,18 @@ const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick }) =>
 );
 
 // --- 頁面：多系統登入 ---
-const AuthScreen = ({ setAppMode }) => {
+const AuthScreen = ({ setAppMode, systemPasswords }) => {
   const [selectedSys, setSelectedSystem] = useState(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => { const clearStaleAuth = async () => { try { await signOut(auth); } catch (e) {} }; clearStaleAuth(); }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (password !== selectedSys.pwd) { setError('密碼錯誤，請重新輸入'); return; }
-    setLoading(true);
-    try {
-      await signInAnonymously(auth);
-      localStorage.setItem('appMode', selectedSys.id);
-      setAppMode(selectedSys.id);
-    } catch (err) { 
-      setError("系統連線失敗，請檢查網路"); setLoading(false); 
-    }
+    const correctPwd = systemPasswords[selectedSys.id] || selectedSys.pwd;
+    if (password !== correctPwd) { setError('密碼錯誤，請重新輸入'); return; }
+    localStorage.setItem('appMode', selectedSys.id);
+    setAppMode(selectedSys.id);
   };
 
   return (
@@ -326,8 +320,8 @@ const AuthScreen = ({ setAppMode }) => {
             <form onSubmit={handleSubmit} className="space-y-5">
               <input type="password" placeholder="請輸入管理密碼" value={password} onChange={e=>setPassword(e.target.value)} className="w-full border-2 border-slate-200 p-3.5 rounded-xl outline-none focus:border-indigo-500 transition-colors text-lg tracking-widest text-center font-mono" required autoFocus/>
               {error && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center justify-center gap-2"><AlertTriangle className="w-4 h-4"/> {error}</div>}
-              <button type="submit" disabled={loading} className={`w-full text-white py-3.5 rounded-xl font-bold transition-colors shadow-md disabled:opacity-70 ${selectedSys.colorClass} ${selectedSys.hoverClass}`}>
-                {loading ? '系統驗證中...' : '確認登入'}
+              <button type="submit" className={`w-full text-white py-3.5 rounded-xl font-bold transition-colors shadow-md ${selectedSys.colorClass} ${selectedSys.hoverClass}`}>
+                確認登入
               </button>
             </form>
           </div>
@@ -343,6 +337,13 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [appMode, setAppMode] = useState(localStorage.getItem('appMode') || null);
   
+  // 🟢 系統密碼狀態
+  const [systemPasswords, setSystemPasswords] = useState({
+    lab: 'minar7917',
+    property_jl: 'jlpan@314',
+    property_kung: 'kung7917'
+  });
+
   // Navigation State
   const [viewMode, setViewMode] = useState('dashboard'); 
   const [currentSession, setCurrentSession] = useState(null); 
@@ -356,14 +357,13 @@ export default function App() {
   const [categories, setCategories] = useState([]);
   const [loans, setLoans] = useState([]); 
   
-  // 🟢 實驗室配置圖 State
+  // 實驗室配置圖 State
   const [layoutItems, setLayoutItems] = useState([]);
   const [dragState, setDragState] = useState(null); 
   const [localLayouts, setLocalLayouts] = useState({});
   const [layoutForm, setLayoutForm] = useState({ label: '' });
   const [layoutScale, setLayoutScale] = useState(1); 
   
-  // 🟢 畫布平移與追蹤 Ref
   const mapContainerRef = useRef(null);
   const pointerCache = useRef({});
   const pinchStartRef = useRef(null);
@@ -371,7 +371,6 @@ export default function App() {
   const [canvasPan, setCanvasPanState] = useState({ x: 0, y: 0 });
   const [canvasDrag, setCanvasDrag] = useState(null);
 
-  // Helper to keep ref synced with state for reliable reads in event handlers
   const setCanvasPan = (newValOrFn) => {
       setCanvasPanState(prev => {
           const val = typeof newValOrFn === 'function' ? newValOrFn(prev) : newValOrFn;
@@ -425,6 +424,8 @@ export default function App() {
   const [fullScreenImage, setFullScreenImage] = useState(null); 
 
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+  const [isPwdModalOpen, setIsPwdModalOpen] = useState(false);
+  const [pwdForm, setPwdForm] = useState({ old: '', new: '', confirm: '' });
 
   // DB Path Helpers
   const colSessionsName = appMode === 'lab' ? 'sessions' : `sessions_${appMode}`;
@@ -443,8 +444,31 @@ export default function App() {
     }
   }, []);
 
-  // Init Auth
-  useEffect(() => { const unsubscribe = onAuthStateChanged(auth, u => { setUser(u); setLoading(false); }); return () => unsubscribe(); }, []);
+  // 🟢 Init Auth (Anonymous login immediately to fetch passwords)
+  useEffect(() => { 
+    const unsubscribe = onAuthStateChanged(auth, async u => { 
+      if (u) {
+        setUser(u);
+      } else {
+        try { await signInAnonymously(auth); } catch(e) { console.error(e); }
+      }
+      setLoading(false); 
+    }); 
+    return () => unsubscribe(); 
+  }, []);
+
+  // 🟢 獲取全域密碼設定
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'configs', 'passwords'), (docSnap) => {
+      if (docSnap.exists()) {
+        setSystemPasswords(prev => ({...prev, ...docSnap.data()}));
+      } else {
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configs', 'passwords'), systemPasswords);
+      }
+    });
+    return () => unsub();
+  }, [user]);
 
   // Reset Filters, Selection & Navigation on Mode Change
   useEffect(() => {
@@ -614,7 +638,31 @@ export default function App() {
   }, [user, appMode, currentSession, isLab, colItemsName]);
 
   const showToast = (msg, type='success') => setToast({message: msg, type});
-  const handleLogout = async () => { try { await signOut(auth); localStorage.removeItem('appMode'); setAppMode(null); } catch(e){} };
+  
+  const handleLogout = () => { 
+    localStorage.removeItem('appMode'); 
+    setAppMode(null); 
+  };
+
+  const handlePwdSubmit = async (e) => {
+    e.preventDefault();
+    const correctOld = systemPasswords[appMode];
+    if (pwdForm.old !== correctOld) return showToast("目前密碼錯誤", "error");
+    if (pwdForm.new !== pwdForm.confirm) return showToast("新密碼輸入不一致", "error");
+    if (pwdForm.new.length < 4) return showToast("密碼長度太短", "error");
+    
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configs', 'passwords'), {
+        [appMode]: pwdForm.new
+      }, { merge: true });
+      showToast("密碼更改成功");
+      setIsPwdModalOpen(false);
+      setPwdForm({ old: '', new: '', confirm: '' });
+    } catch (e) {
+      showToast("更改失敗", "error");
+    }
+  };
+
   const getAvailability = (item) => isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
   
   const handleImageChange = async (e) => {
@@ -1179,7 +1227,6 @@ export default function App() {
       }
   };
 
-  // 🟢 控制 UI 按鈕縮放
   const handleZoomClick = (direction) => {
     const container = mapContainerRef.current;
     if (!container) return;
@@ -1206,7 +1253,7 @@ export default function App() {
 
   const handleAddLayoutItem = async (type) => {
       if (!currentSession) return;
-      const typeLabels = { computer: '電腦', server: '伺服器', printer: '印表機', desk: '辦公桌' };
+      const typeLabels = { computer: '電腦', server: '伺服器', printer: '印表機', desk: '辦公桌', aisle: '走道' };
       
       const centerX = (-canvasPan.x + 100) / layoutScale;
       const centerY = (-canvasPan.y + 100) / layoutScale;
@@ -1289,11 +1336,13 @@ export default function App() {
       if (type === 'server') return <Server className="w-12 h-12 text-slate-700" />;
       if (type === 'printer') return <Printer className="w-12 h-12 text-slate-700" />;
       if (type === 'desk') return <div className="w-16 h-12 border-2 border-slate-400 bg-slate-100 rounded-sm"></div>;
+      // 🟢 走道圖塊
+      if (type === 'aisle') return <div className="w-40 h-16 border-2 border-dashed border-slate-400/70 bg-slate-200/50 rounded flex items-center justify-center"><GripHorizontal className="w-6 h-6 text-slate-400/50"/></div>;
       return <Box className="w-12 h-12 text-slate-700" />;
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-teal-600 font-medium animate-pulse">系統環境載入中...</div>;
-  if (!user || !appMode) return <AuthScreen setAppMode={setAppMode} />;
+  if (!user || !appMode) return <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} />;
 
   const SysConfig = SYSTEM_CONFIGS.find(s => s.id === appMode) || SYSTEM_CONFIGS[0];
 
@@ -1312,10 +1361,33 @@ export default function App() {
         </div>
       )}
 
+      {/* 🟢 密碼更改 Modal */}
+      {isPwdModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsPwdModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+              <h3 className={`text-xl font-bold ${SysConfig.textClass} flex items-center gap-2`}><Key className="w-5 h-5"/> 更改系統密碼</h3>
+              <button onClick={() => setIsPwdModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
+            </div>
+            <form onSubmit={handlePwdSubmit} className="space-y-4">
+              <div><label className="text-sm font-bold text-slate-700 block mb-1">目前密碼</label><input type="password" value={pwdForm.old} onChange={e=>setPwdForm({...pwdForm, old:e.target.value})} className={`w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500`} required/></div>
+              <div><label className="text-sm font-bold text-slate-700 block mb-1">新密碼</label><input type="password" value={pwdForm.new} onChange={e=>setPwdForm({...pwdForm, new:e.target.value})} className={`w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500`} required/></div>
+              <div><label className="text-sm font-bold text-slate-700 block mb-1">確認新密碼</label><input type="password" value={pwdForm.confirm} onChange={e=>setPwdForm({...pwdForm, confirm:e.target.value})} className={`w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500`} required/></div>
+              <button type="submit" className={`w-full text-white py-3 rounded-xl font-bold shadow-md mt-4 transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>確認更改</button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 w-64 bg-slate-900 text-slate-100 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
-        <div className={`p-6 ${SysConfig.colorClass}`}>
+        <div className={`p-6 ${SysConfig.colorClass} flex items-center justify-between`}>
           <h1 className="text-lg font-bold flex items-center gap-2"><SysConfig.icon className="w-5 h-5"/> {SysConfig.name}</h1>
+          <div className="flex items-center gap-1">
+             {/* 🟢 密碼修改與登出按鈕移至此處 */}
+             <button onClick={() => setIsPwdModalOpen(true)} title="更改密碼" className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Key className="w-4 h-4"/></button>
+             <button onClick={handleLogout} title="登出系統" className="p-1.5 text-white/80 hover:text-rose-200 hover:bg-white/20 rounded-md transition-colors"><LogOut className="w-4 h-4"/></button>
+          </div>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <button onClick={() => { setViewMode('dashboard'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'dashboard' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Home className="w-5 h-5" /> 首頁概覽</button>
@@ -1336,7 +1408,6 @@ export default function App() {
             </div>
           )}
         </nav>
-        <div className="p-4 border-t border-white/10"><button onClick={handleLogout} className="flex items-center gap-2 text-sm text-red-300 hover:text-red-400 font-bold transition-colors w-full p-2 rounded hover:bg-white/5"><LogOut className="w-4 h-4"/> 登出系統 / 切換模組</button></div>
       </aside>
 
       {/* Main Content */}
@@ -1412,10 +1483,6 @@ export default function App() {
           {/* Dashboard View */}
           {viewMode === 'dashboard' && (
              <div className="space-y-6 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className={`p-2 rounded-lg bg-opacity-10 text-opacity-100 ${SysConfig.colorClass.replace('bg-', 'bg-').replace('600', '100')} ${SysConfig.textClass}`}><Sparkles className="w-5 h-5"/></div>
-                  <span className="text-sm font-bold text-slate-500">目前鎖定清單：<span className={`text-base ${SysConfig.textClass}`}>{dashboardStats.latestSessionName}</span></span>
-                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <StatCard title={isLab ? "管理中版次總數" : "歷史清單總數"} value={sessions.length} icon={FolderOpen} colorClass="bg-slate-700" onClick={() =>setViewMode('sessions')} />
                     <StatCard title={isLab ? "最新版次設備種類" : "清單財產總筆數"} value={dashboardStats.totalItems} icon={Box} colorClass={SysConfig.colorClass} onClick={() => handleStatClick('items')} />
@@ -1424,8 +1491,9 @@ export default function App() {
                 </div>
                 
                 {isLab ? (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col h-[400px]">
+                <div className="grid grid-cols-1 gap-6">
+                    {/* 🟢 移除系統提示，並將表格寬度設為滿版 */}
+                    <div className="w-full bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col h-[400px]">
                     <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><History className="w-5 h-5 text-teal-600"/> 最新借用動態</h3></div>
                     <div className="flex-1 overflow-auto">
                         <table className="w-full text-left min-w-[500px]">
@@ -1447,11 +1515,6 @@ export default function App() {
                         </tbody>
                         </table>
                     </div>
-                    </div>
-                    <div className={`bg-gradient-to-br from-${themeColor}-600 to-${themeColor}-800 rounded-2xl p-6 text-white shadow-lg flex flex-col justify-center relative overflow-hidden`}>
-                        <h3 className="font-bold text-lg mb-2 relative z-10">系統提示</h3>
-                        <p className={`text-${themeColor}-100 text-sm mb-6 relative z-10`}>系統預設鎖定最新清單。若需檢視過去資料，請前往「版次總覽」。</p>
-                        <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); }} className="w-full bg-white/20 hover:bg-white/30 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 relative z-10 border border-white/20">查看所有 <ChevronRight className="w-4 h-4"/></button>
                     </div>
                 </div>
                 ) : (
@@ -1879,6 +1942,7 @@ export default function App() {
                       <button onClick={() => handleAddLayoutItem('server')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Server className="w-4 h-4"/> 伺服器</button>
                       <button onClick={() => handleAddLayoutItem('printer')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Printer className="w-4 h-4"/> 印表機</button>
                       <button onClick={() => handleAddLayoutItem('desk')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Box className="w-4 h-4"/> 辦公桌</button>
+                      <button onClick={() => handleAddLayoutItem('aisle')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><GripHorizontal className="w-4 h-4"/> 走道</button>
                       
                       {/* Zoom Controls */}
                       <div className="ml-auto flex items-center gap-2 bg-white px-2 py-1.5 rounded-lg border border-slate-200 shadow-sm shrink-0">
