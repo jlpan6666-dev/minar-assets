@@ -70,6 +70,14 @@ const getMinguoDateString = () => {
   return `${minguoYear}/${month}/${day}`;
 };
 
+// --- 🔵 工具函式：計算預計歸還日期 ---
+const getExpectedReturnDate = (dateStr, days) => { 
+  if(!dateStr || !days) return ''; 
+  const d = new Date(dateStr); 
+  d.setDate(d.getDate() + parseInt(days)); 
+  return d.toISOString().slice(0,10); 
+};
+
 // --- 🔵 工具函式：圖片壓縮轉 Base64 ---
 const compressImage = (file) => {
   return new Promise((resolve, reject) => {
@@ -719,7 +727,6 @@ export default function App() {
               tSnapshot.forEach(d => batch.delete(d.ref));
           }
           
-          // 🟢 Clear layout items
           if (isLab) {
               const qLayouts = query(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'), where('sessionId', '==', id));
               const lSnapshot = await getDocs(qLayouts);
@@ -839,7 +846,6 @@ export default function App() {
                     countItems++;
                 });
 
-                // 🟢 Copy Layouts for Lab
                 const qLayouts = query(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'), where('sessionId', '==', latestSession.id));
                 const layoutsDocs = await getDocs(qLayouts);
                 layoutsDocs.forEach(docSnap => {
@@ -1031,7 +1037,6 @@ export default function App() {
     } catch (err) { showToast("操作失敗", "error"); }
   };
 
-  // 🟢 實驗室配置圖拖曳邏輯
   const handleAddLayoutItem = async (type) => {
       if (!currentSession) return;
       const typeLabels = { computer: '電腦', server: '伺服器', printer: '印表機', desk: '辦公桌' };
@@ -1107,11 +1112,11 @@ export default function App() {
   };
 
   const renderLayoutIcon = (type) => {
-      if (type === 'computer') return <Monitor className="w-8 h-8 text-slate-700" />;
-      if (type === 'server') return <Server className="w-8 h-8 text-slate-700" />;
-      if (type === 'printer') return <Printer className="w-8 h-8 text-slate-700" />;
-      if (type === 'desk') return <div className="w-12 h-8 border-2 border-slate-400 bg-slate-100 rounded-sm"></div>;
-      return <Box className="w-8 h-8 text-slate-700" />;
+      if (type === 'computer') return <Monitor className="w-12 h-12 text-slate-700" />;
+      if (type === 'server') return <Server className="w-12 h-12 text-slate-700" />;
+      if (type === 'printer') return <Printer className="w-12 h-12 text-slate-700" />;
+      if (type === 'desk') return <div className="w-16 h-12 border-2 border-slate-400 bg-slate-100 rounded-sm"></div>;
+      return <Box className="w-12 h-12 text-slate-700" />;
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-teal-600 font-medium animate-pulse">系統環境載入中...</div>;
@@ -1152,7 +1157,6 @@ export default function App() {
                 <>
                 <button onClick={() => { setViewMode('borrow-request'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'borrow-request' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><ShoppingCart className="w-5 h-5" /> 借用登記</button>
                 <button onClick={() => { setViewMode('loans'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'loans' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><History className="w-5 h-5" /> 借還紀錄表</button>
-                {/* 🟢 新增：實驗室配置圖選項 */}
                 <button onClick={() => { setViewMode('layout'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'layout' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><Map className="w-5 h-5" /> 實驗室配置圖</button>
                 </>
               )}
@@ -1359,6 +1363,8 @@ export default function App() {
                       <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
                     </div>
                     <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 items-center hide-scrollbar">
+                        
+                        {/* Date Filter */}
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                                 <Calendar className={`w-4 h-4 ${searchDate ? SysConfig.textClass : 'text-slate-500'}`} />
@@ -1366,36 +1372,61 @@ export default function App() {
                             </div>
                             {searchDate && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchDate} <button onClick={()=>setSearchDate('')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
                         </div>
+                        
+                        {/* Lab Category Filter */}
                         {isLab && (
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                                 <Filter className={`w-4 h-4 ${selectedCategoryFilter !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類"><option value="all">所有分類</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                                <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類">
+                                  <option value="all">所有分類</option>
+                                  {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
                             </div>
                             {selectedCategoryFilter !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{categories.find(c => c.id === selectedCategoryFilter)?.name} <button onClick={()=>setSelectedCategoryFilter('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
                         </div>
                         )}
+
+                        {/* Property Status Filter */}
                         {!isLab && (
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                                 <CheckSquare className={`w-4 h-4 ${searchStatus !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀況"><option value="all">全部狀況</option><option value="未盤點">未盤點</option><option value="已盤點">已盤點</option></select>
+                                <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀況">
+                                  <option value="all">全部狀況</option>
+                                  <option value="未盤點">未盤點</option>
+                                  <option value="已盤點">已盤點</option>
+                                </select>
                             </div>
                             {searchStatus !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchStatus} <button onClick={()=>setSearchStatus('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
                         </div>
                         )}
+
+                        {/* Sort Options */}
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                                 <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'created_desc' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式"><option value="created_desc" hidden>預設(最新)</option><option value="name">名稱排序</option>{isLab && <option value="quantity_desc">數量 (多→少)</option>}{isLab && <option value="quantity_asc">數量 (少→多)</option>}{!isLab && <option value="propId_asc">財產編號 (小→大)</option>}{!isLab && <option value="propId_desc">財產編號 (大→小)</option>}</select>
+                                <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式">
+                                    <option value="created_desc" hidden>預設(最新)</option>
+                                    <option value="name">名稱排序</option>
+                                    {isLab && <option value="quantity_desc">數量 (多→少)</option>}
+                                    {isLab && <option value="quantity_asc">數量 (少→多)</option>}
+                                    {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
+                                    {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
+                                </select>
                             </div>
                             {sortOption !== 'created_desc' && (
                                <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>
-                                 {sortOption === 'name' && '名稱排序'}{sortOption === 'quantity_desc' && '數量 (多→少)'}{sortOption === 'quantity_asc' && '數量 (少→多)'}{sortOption === 'propId_asc' && '編號 (小→大)'}{sortOption === 'propId_desc' && '編號 (大→小)'}
+                                 {sortOption === 'name' && '名稱排序'}
+                                 {sortOption === 'quantity_desc' && '數量 (多→少)'}
+                                 {sortOption === 'quantity_asc' && '數量 (少→多)'}
+                                 {sortOption === 'propId_asc' && '編號 (小→大)'}
+                                 {sortOption === 'propId_desc' && '編號 (大→小)'}
                                  <button onClick={()=>setSortOption('created_desc')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
                                </div>
                             )}
                         </div>
+
                         <div className="flex items-center gap-1 flex-shrink-0 border-l border-slate-200 pl-2 ml-1">
                             <button onClick={() => { if (isSelectionMode) { setIsSelectionMode(false); setSelectedItemIds([]); } else { setIsSelectionMode(true); } }} className={`flex items-center justify-center px-3 py-2 border rounded-lg transition-colors cursor-pointer gap-1.5 shadow-sm text-sm font-bold ${isSelectionMode ? `bg-${themeColor}-50 border-${themeColor}-300 ${SysConfig.textClass}` : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
                               <ListChecks className={`w-4 h-4 ${isSelectionMode ? SysConfig.textClass : 'text-slate-500'}`} />
@@ -1405,19 +1436,39 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Mobile Card View */}
+                  {/* Mobile Card View (Paginated with Selection) */}
                   <div className="block md:hidden">
                     <div className="space-y-4">
                       {paginatedItems.map(item => {
                         const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
                         const isSelected = selectedItemIds.includes(item.id);
                         return (
-                          <div key={item.id} onClick={() => isSelectionMode && toggleSelection(item.id)} className={`bg-white rounded-xl shadow-sm border p-4 flex gap-3 relative transition-all ${isSelectionMode ? 'cursor-pointer hover:shadow-md' : ''} ${isSelectionMode && isSelected ? `border-${themeColor}-400 ring-1 ring-${themeColor}-400 bg-${themeColor}-50/30` : 'border-slate-200'}`}>
-                            {isSelectionMode && <div className="flex items-center justify-center pr-1" onClick={e => e.stopPropagation()}><input type="checkbox" checked={isSelected} onChange={() => toggleSelection(item.id)} className="w-5 h-5 cursor-pointer accent-indigo-600 rounded" /></div>}
+                          <div 
+                            key={item.id} 
+                            onClick={() => isSelectionMode && toggleSelection(item.id)}
+                            className={`bg-white rounded-xl shadow-sm border p-4 flex gap-3 relative transition-all ${isSelectionMode ? 'cursor-pointer hover:shadow-md' : ''} ${isSelectionMode && isSelected ? `border-${themeColor}-400 ring-1 ring-${themeColor}-400 bg-${themeColor}-50/30` : 'border-slate-200'}`}
+                          >
+                            {/* Checkbox for Selection Mode */}
+                            {isSelectionMode && (
+                              <div className="flex items-center justify-center pr-1" onClick={e => e.stopPropagation()}>
+                                <input 
+                                  type="checkbox" 
+                                  checked={isSelected} 
+                                  onChange={() => toggleSelection(item.id)} 
+                                  className="w-5 h-5 cursor-pointer accent-indigo-600 rounded" 
+                                />
+                              </div>
+                            )}
+
                             {item.imageUrl ? (
-                               <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100"><img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={(e) => { if(!isSelectionMode) { e.stopPropagation(); setFullScreenImage(item.imageUrl); } }} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/></div>
+                               <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100">
+                                 <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover cursor-pointer" onClick={(e) => { if(!isSelectionMode) { e.stopPropagation(); setFullScreenImage(item.imageUrl); } }} onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
+                               </div>
                             ) : (
-                               <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100"><ImageIcon className="w-5 h-5 mb-1"/><span className="text-[10px]">無照片</span></div>
+                               <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
+                                 <ImageIcon className="w-5 h-5 mb-1"/>
+                                 <span className="text-[10px]">無照片</span>
+                               </div>
                             )}
                             <div className="flex-1 min-w-0">
                               <div className="flex justify-between items-start mb-1 gap-2">
@@ -1426,6 +1477,7 @@ export default function App() {
                                   <h3 className="font-bold text-base text-slate-800 truncate">{item.name}</h3>
                                 </div>
                               </div>
+                              
                               {!isLab && (
                                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-2 mb-2 text-[10px] text-slate-600 bg-slate-50 p-2 rounded-lg">
                                     <div className="truncate"><span className="text-slate-400">廠牌:</span> {item.brandModel || '-'}</div>
@@ -1435,17 +1487,48 @@ export default function App() {
                                     <div className="col-span-2 truncate"><span className="text-slate-400">備註:</span> {item.note || '-'}</div>
                                  </div>
                               )}
+
                               <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                                {isLab ? <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.categoryName}</span> : <>{item.user && <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5"><UserCheck className="w-3 h-3"/>{item.user}</span>}<span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.location || '無地點'}</span></>}
+                                {isLab ? (
+                                    <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.categoryName}</span>
+                                ) : (
+                                    <>
+                                    {item.user && <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5"><UserCheck className="w-3 h-3"/>{item.user}</span>}
+                                    <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-medium">{item.location || '無地點'}</span>
+                                    </>
+                                )}
                                 {item.addDate && isLab && <span className={`inline-block bg-opacity-10 text-[10px] px-1.5 py-0.5 rounded font-bold ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')} ${SysConfig.textClass}`}>{item.addDate}</span>}
                               </div>
                               {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5"/> 更新: {item.lastUpdatedStr}</div>}
+                              
+                              {/* Bottom Action Area (Hidden if Selection Mode) */}
                               {!isSelectionMode && (
                                 <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between gap-2">
                                   {isLab ? (
-                                      <><div className="flex gap-2 text-xs text-slate-600 font-mono"><span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span></div><div className="flex items-center gap-1.5 flex-shrink-0"><div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5"><button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button><button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button></div><button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}><Plus className="w-3 h-3"/> 借用</button></div></>
+                                      <>
+                                      <div className="flex gap-2 text-xs text-slate-600 font-mono">
+                                          <span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                                          <div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                                            <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
+                                            <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
+                                          </div>
+                                          <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}>
+                                            <Plus className="w-3 h-3"/> 借用
+                                          </button>
+                                      </div>
+                                      </>
                                   ) : (
-                                      <><button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>{item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}</button><div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5"><button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button><button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button></div></>
+                                      <>
+                                      <button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                                          {item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}
+                                      </button>
+                                      <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                                        <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
+                                        <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
+                                      </div>
+                                      </>
                                   )}
                                 </div>
                               )}
@@ -1458,20 +1541,41 @@ export default function App() {
                     <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                   </div>
 
-                  {/* Desktop Table View */}
+                  {/* 🟢 Desktop Table View (Paginated with Selection) */}
                   <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 sticky top-0 z-10 shadow-sm">
                             <tr>
+                            {/* Master Checkbox Header */}
                             {isSelectionMode && (
-                              <th className="p-3 w-12 text-center align-middle"><input type="checkbox" className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" checked={filteredItems.length > 0 && selectedItemIds.length === filteredItems.length} onChange={handleSelectAll} title="全選目前篩選資料"/></th>
+                              <th className="p-3 w-12 text-center align-middle">
+                                <input 
+                                  type="checkbox" 
+                                  className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" 
+                                  checked={filteredItems.length > 0 && selectedItemIds.length === filteredItems.length} 
+                                  onChange={handleSelectAll} 
+                                  title="全選目前篩選資料"
+                                />
+                              </th>
                             )}
                             <th className="p-3 w-14 text-center">圖</th>
                             {isLab ? (
-                                <><th className="p-3 font-semibold w-1/4">設備資訊</th><th className="p-3 font-semibold w-1/4">分類 / 日期</th><th className="p-3 font-semibold w-1/4">庫存狀態</th><th className="p-3 font-semibold text-right w-1/4">操作</th></>
+                                <>
+                                <th className="p-3 font-semibold w-1/4">設備資訊</th>
+                                <th className="p-3 font-semibold w-1/4">分類 / 日期</th>
+                                <th className="p-3 font-semibold w-1/4">庫存狀態</th>
+                                <th className="p-3 font-semibold text-right w-1/4">操作</th>
+                                </>
                             ) : (
-                                <><th className="p-3 font-semibold w-[20%]">財產編號 / 名稱</th><th className="p-3 font-semibold w-[15%]">廠牌型別</th><th className="p-3 font-semibold w-[15%]">使用人 / 存置地點</th><th className="p-3 font-semibold w-[20%]">取得日期 / 現值 / 年限</th><th className="p-3 font-semibold w-[10%] text-center">狀況</th><th className="p-3 font-semibold text-right w-[15%]">操作</th></>
+                                <>
+                                <th className="p-3 font-semibold w-[20%]">財產編號 / 名稱</th>
+                                <th className="p-3 font-semibold w-[15%]">廠牌型別</th>
+                                <th className="p-3 font-semibold w-[15%]">使用人 / 存置地點</th>
+                                <th className="p-3 font-semibold w-[20%]">取得日期 / 現值 / 年限</th>
+                                <th className="p-3 font-semibold w-[10%] text-center">狀況</th>
+                                <th className="p-3 font-semibold text-right w-[15%]">操作</th>
+                                </>
                             )}
                             </tr>
                         </thead>
@@ -1480,41 +1584,102 @@ export default function App() {
                             const available = isLab ? (item.quantity - (item.borrowedCount || 0)) : 0;
                             const isSelected = selectedItemIds.includes(item.id);
                             return (
-                                <tr key={item.id} onClick={() => isSelectionMode && toggleSelection(item.id)} className={`transition-colors group ${isSelectionMode ? 'cursor-pointer' : ''} ${isSelected ? `bg-${themeColor}-50/60` : 'hover:bg-slate-50/50'}`}>
+                                <tr 
+                                  key={item.id} 
+                                  onClick={() => isSelectionMode && toggleSelection(item.id)}
+                                  className={`transition-colors group ${isSelectionMode ? 'cursor-pointer' : ''} ${isSelected ? `bg-${themeColor}-50/60` : 'hover:bg-slate-50/50'}`}
+                                >
+                                {/* Individual Checkbox */}
                                 {isSelectionMode && (
-                                  <td className="p-3 text-center align-middle" onClick={e => e.stopPropagation()}><input type="checkbox" className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" checked={isSelected} onChange={() => toggleSelection(item.id)} /></td>
+                                  <td className="p-3 text-center align-middle" onClick={e => e.stopPropagation()}>
+                                    <input 
+                                      type="checkbox" 
+                                      className="w-4 h-4 cursor-pointer accent-indigo-600 rounded" 
+                                      checked={isSelected} 
+                                      onChange={() => toggleSelection(item.id)} 
+                                    />
+                                  </td>
                                 )}
+
                                 <td className="p-3 text-center align-top pt-4">
                                     {item.imageUrl ? (
                                         <div onClick={(e) => { if(!isSelectionMode) { e.stopPropagation(); setFullScreenImage(item.imageUrl); } }} className={`inline-block w-10 h-10 rounded-lg overflow-hidden border border-slate-200 shadow-sm ${!isSelectionMode ? 'hover:scale-150 transition-transform origin-left cursor-pointer' : ''}`}>
                                             <img src={item.imageUrl} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE_SRC; }}/>
                                         </div>
                                     ) : (
-                                        <div className="w-10 h-10 mx-auto rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100"><ImageIcon className="w-4 h-4 mb-0.5"/><span className="text-[8px] leading-none scale-90 font-bold">無照片</span></div>
+                                        <div className="w-10 h-10 mx-auto rounded-lg bg-slate-50 flex flex-col items-center justify-center text-slate-400 border border-slate-100">
+                                            <ImageIcon className="w-4 h-4 mb-0.5"/>
+                                            <span className="text-[8px] leading-none scale-90 font-bold">無照片</span>
+                                        </div>
                                     )}
                                 </td>
                                 {isLab ? (
                                     <>
-                                    <td className="p-3 align-top"><div className="font-bold text-slate-800">{item.name}</div><div className="text-xs text-slate-500 mt-1 max-w-[200px] truncate" title={item.note}>{item.note || '-'}</div>{item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}</td>
-                                    <td className="p-3 align-top"><span className="inline-block bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs font-medium text-slate-600 mb-1">{item.categoryName}</span>{item.addDate && <div className={`text-[10px] font-bold mt-1 ${SysConfig.textClass}`}>加入: {item.addDate}</div>}</td>
-                                    <td className="p-3 align-top"><div className="flex items-center gap-2"><span className="font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-xs">總 {item.quantity}</span><span className="font-mono text-orange-600 bg-orange-50 px-2 py-0.5 rounded text-xs">借 {item.borrowedCount || 0}</span><span className={`font-mono px-2 py-0.5 rounded text-xs font-bold ${available === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'}`}>剩 {available}</span></div></td>
+                                    <td className="p-3 align-top">
+                                        <div className="font-bold text-slate-800">{item.name}</div>
+                                        <div className="text-xs text-slate-500 mt-1 max-w-[200px] truncate" title={item.note}>{item.note || '-'}</div>
+                                        {item.lastUpdatedStr && <div className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
+                                    </td>
+                                    <td className="p-3 align-top">
+                                        <span className="inline-block bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs font-medium text-slate-600 mb-1">{item.categoryName}</span>
+                                        {item.addDate && <div className={`text-[10px] font-bold mt-1 ${SysConfig.textClass}`}>加入: {item.addDate}</div>}
+                                    </td>
+                                    <td className="p-3 align-top">
+                                        <div className="flex items-center gap-2">
+                                        <span className="font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-xs">總 {item.quantity}</span>
+                                        <span className="font-mono text-orange-600 bg-orange-50 px-2 py-0.5 rounded text-xs">借 {item.borrowedCount || 0}</span>
+                                        <span className={`font-mono px-2 py-0.5 rounded text-xs font-bold ${available === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'}`}>剩 {available}</span>
+                                        </div>
+                                    </td>
                                     <td className="p-3 text-right align-top">
                                         {!isSelectionMode && (
-                                            <div className="flex justify-end gap-1.5"><button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : SysConfig.colorClass}`}><Plus className="w-3.5 h-3.5"/> 借用</button><button onClick={()=>openItemModal(item)} className="p-1.5 text-slate-400 hover:text-teal-600 bg-transparent hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4"/></button><button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button></div>
+                                            <div className="flex justify-end gap-1.5">
+                                            <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : SysConfig.colorClass}`}>
+                                                <Plus className="w-3.5 h-3.5"/> 借用
+                                            </button>
+                                            <button onClick={()=>openItemModal(item)} className="p-1.5 text-slate-400 hover:text-teal-600 bg-transparent hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4"/></button>
+                                            <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
+                                            </div>
                                         )}
                                     </td>
                                     </>
                                 ) : (
                                     <>
-                                    <td className="p-3 align-top"><div className={`font-mono font-bold text-sm tracking-wider mb-1 ${SysConfig.textClass}`}>{item.propId || '無編號'}</div><div className="font-bold text-slate-800 text-sm">{item.name}</div>{item.lastUpdatedStr && <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}</td>
-                                    <td className="p-3 align-top text-xs text-slate-600">{item.brandModel || '-'}</td>
-                                    <td className="p-3 align-top"><div className="text-sm font-medium text-slate-700 flex items-center gap-1"><UserCheck className="w-3.5 h-3.5 text-slate-400"/> {item.user || '-'}</div><div className="text-xs text-slate-500 mt-1">{item.location || '-'}</div></td>
-                                    <td className="p-3 align-top text-xs text-slate-600 space-y-1"><div><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div><div><span className="text-slate-400">現值:</span> <span className="font-mono">${item.value || 0}</span></div><div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div></td>
+                                    <td className="p-3 align-top">
+                                        <div className={`font-mono font-bold text-sm tracking-wider mb-1 ${SysConfig.textClass}`}>{item.propId || '無編號'}</div>
+                                        <div className="font-bold text-slate-800 text-sm">{item.name}</div>
+                                        {item.lastUpdatedStr && <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Clock className="w-3 h-3"/> 更新: {item.lastUpdatedStr}</div>}
+                                    </td>
+                                    <td className="p-3 align-top text-xs text-slate-600">
+                                        {item.brandModel || '-'}
+                                    </td>
+                                    <td className="p-3 align-top">
+                                        <div className="text-sm font-medium text-slate-700 flex items-center gap-1"><UserCheck className="w-3.5 h-3.5 text-slate-400"/> {item.user || '-'}</div>
+                                        <div className="text-xs text-slate-500 mt-1">{item.location || '-'}</div>
+                                    </td>
+                                    <td className="p-3 align-top text-xs text-slate-600 space-y-1">
+                                        <div><span className="text-slate-400">取得:</span> {item.acquireDate || '-'}</div>
+                                        <div><span className="text-slate-400">現值:</span> <span className="font-mono">${item.value || 0}</span></div>
+                                        <div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
+                                    </td>
                                     <td className="p-3 align-top text-center">
-                                        {!isSelectionMode ? <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">{item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}</button> : <span className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>{item.status}</span>}
+                                        {!isSelectionMode ? (
+                                            <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">
+                                                {item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}
+                                            </button>
+                                        ) : (
+                                            <span className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                                                {item.status}
+                                            </span>
+                                        )}
                                     </td>
                                     <td className="p-3 text-right align-top">
-                                        {!isSelectionMode && <div className="flex justify-end gap-1"><button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button><button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button></div>}
+                                        {!isSelectionMode && (
+                                            <div className="flex justify-end gap-1">
+                                            <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button>
+                                            <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
+                                            </div>
+                                        )}
                                     </td>
                                     </>
                                 )}
@@ -1566,17 +1731,17 @@ export default function App() {
                                       onPointerDown={(e) => handleLayoutPointerDown(e, item)}
                                       onDoubleClick={(e) => { e.stopPropagation(); openLayoutEditModal(item); }}
                                       style={{ transform: `translate(${currentX}px, ${currentY}px)` }}
-                                      className={`absolute top-0 left-0 p-3 bg-white/90 backdrop-blur-sm border-2 rounded-xl shadow-md cursor-grab flex flex-col items-center justify-center select-none group transition-shadow ${isDragging ? 'cursor-grabbing border-teal-500 shadow-xl ring-4 ring-teal-500/20 z-50 scale-105' : 'border-slate-300 hover:border-teal-400 z-10 hover:z-40 hover:shadow-lg'}`}
+                                      className={`absolute top-0 left-0 p-4 bg-white/90 backdrop-blur-sm border-2 rounded-xl shadow-md cursor-grab flex flex-col items-center justify-center select-none group transition-shadow ${isDragging ? 'cursor-grabbing border-teal-500 shadow-xl ring-4 ring-teal-500/20 z-50 scale-105' : 'border-slate-300 hover:border-teal-400 z-10 hover:z-40 hover:shadow-lg'}`}
                                   >
                                       {renderLayoutIcon(item.type)}
-                                      <span className="text-[10px] font-bold mt-1.5 text-slate-700 pointer-events-none max-w-[80px] truncate px-1 bg-slate-100 rounded">{item.label}</span>
+                                      <span className="text-sm font-bold mt-2 text-slate-700 pointer-events-none max-w-[120px] truncate px-1.5 bg-slate-100 rounded">{item.label}</span>
                                       
                                       <button 
                                         onPointerDown={(e) => { e.stopPropagation(); handleDeleteLayoutItem(item.id); }} 
-                                        className="absolute -top-2.5 -right-2.5 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110 shadow-sm"
+                                        className="absolute -top-3 -right-3 bg-rose-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110 shadow-sm"
                                         title="刪除設備"
                                       >
-                                        <X className="w-3.5 h-3.5"/>
+                                        <X className="w-4 h-4"/>
                                       </button>
                                   </div>
                               );
@@ -1771,7 +1936,7 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className={`text-xl font-bold ${SysConfig.textClass} flex items-center gap-2`}>
-                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯清單') : (isLab ? '新增版次' : '建立年度清單'))}
+                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯計畫') : (isLab ? '新增版次' : '建立年度清單'))}
                 {modalType === 'table' && (editItem ? '編輯表單名稱' : '新增表單')}
                 {modalType === 'item' && (editItem ? (isLab ? '編輯設備' : '編輯財產') : (isLab ? '新增設備' : '新增財產'))}
                 {modalType === 'category' && (editItem ? '編輯分類' : '新增分類')}
