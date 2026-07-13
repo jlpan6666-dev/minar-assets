@@ -67,7 +67,7 @@ const SYSTEM_CONFIGS = [
 
 // --- 🟢 Google 授權設定 ---
 // 教師/管理者帳號直接寫死於程式碼（免邀請即可登入，解決「老師要先登入才能管理名單」的問題）
-const OWNER_EMAILS = ['jlpan0126@gmail.com', 'jim635241@gmail.com'];
+const OWNER_EMAILS = ['jlpan0126@gmail.com', 'jlpan6666@gmail.com', 'jim635241@gmail.com'];
 const isOwnerEmail = (email) => OWNER_EMAILS.includes((email || '').toLowerCase());
 // 受邀學生名單（由教師於系統內管理）
 const membersDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'configs', 'authorized_members');
