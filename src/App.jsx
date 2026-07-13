@@ -274,12 +274,43 @@ const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick }) =>
   </div>
 );
 
+// --- 元件：實驗室成員管理 Modal（僅教師帳號） ---
+const MemberModal = ({ isOpen, onClose, memberEmails, memberInput, setMemberInput, onAdd, onRemove }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+          <h3 className="text-xl font-bold text-blue-600 flex items-center gap-2"><UserCheck className="w-5 h-5"/> 實驗室成員管理</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">加入學生的 Google Email，該學生即可用 Google 帳號登入系統選單並進行編輯。</p>
+        <form onSubmit={onAdd} className="flex gap-2 mb-5">
+          <input type="email" placeholder="student@gmail.com" value={memberInput} onChange={e=>setMemberInput(e.target.value)} className="flex-1 border border-slate-200 rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" required/>
+          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-lg font-bold shadow-sm flex items-center gap-1"><Plus className="w-4 h-4"/> 邀請</button>
+        </form>
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {memberEmails.length === 0 && <p className="text-sm text-slate-400 text-center py-4">尚未邀請任何學生</p>}
+          {memberEmails.map(email => (
+            <div key={email} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2.5 border border-slate-100">
+              <span className="text-sm font-medium text-slate-700 truncate">{email}</span>
+              <button onClick={() => onRemove(email)} title="移除授權" className="text-slate-400 hover:text-rose-500 p-1 transition-colors flex-shrink-0"><Trash2 className="w-4 h-4"/></button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- 頁面：多系統登入 ---
-const AuthScreen = ({ setAppMode, systemPasswords, user, isAuthorizedMember, membersLoaded }) => {
+const AuthScreen = ({ setAppMode, systemPasswords, user, isAuthorizedMember, membersLoaded, isOwner, memberEmails, memberInput, setMemberInput, onAddMember, onRemoveMember }) => {
   const [selectedSys, setSelectedSystem] = useState(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [isGearOpen, setIsGearOpen] = useState(false);
+  const [isMemberOpen, setIsMemberOpen] = useState(false);
 
   const isGoogleUser = user && !user.isAnonymous;
 
@@ -353,6 +384,23 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, isAuthorizedMember, mem
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-200/30 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div>
+
+      {/* 🟢 入口齒輪選單 */}
+      <div className="absolute top-4 right-4 z-30">
+        <button onClick={() => setIsGearOpen(!isGearOpen)} className="bg-white border border-slate-200 text-slate-700 p-2.5 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-sm transition-all active:scale-95" title="系統設定">
+          <Settings className="w-5 h-5 text-slate-600"/>
+        </button>
+        {isGearOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setIsGearOpen(false)}></div>
+            <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-200">
+              {isOwner && <button onClick={() => { setIsMemberOpen(true); setIsGearOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
+              <button onClick={() => { handleSwitchAccount(); setIsGearOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 flex items-center gap-3 text-rose-600 font-bold transition-colors"><LogOut className="w-4 h-4"/> 登出</button>
+            </div>
+          </>
+        )}
+      </div>
+      <MemberModal isOpen={isMemberOpen && isOwner} onClose={() => setIsMemberOpen(false)} memberEmails={memberEmails} memberInput={memberInput} setMemberInput={setMemberInput} onAdd={onAddMember} onRemove={onRemoveMember} />
 
       <div className="max-w-4xl w-full z-10">
         <div className="text-center mb-10">
@@ -1522,7 +1570,7 @@ export default function App() {
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-teal-600 font-medium animate-pulse">系統環境載入中...</div>;
-  if (!user || !appMode || !isAuthorizedMember) return <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} isAuthorizedMember={isAuthorizedMember} membersLoaded={membersLoaded} />;
+  if (!user || !appMode || !isAuthorizedMember) return <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} isAuthorizedMember={isAuthorizedMember} membersLoaded={membersLoaded} isOwner={isOwner} memberEmails={memberEmails} memberInput={memberInput} setMemberInput={setMemberInput} onAddMember={handleAddMember} onRemoveMember={handleRemoveMember} />;
 
   const SysConfig = SYSTEM_CONFIGS.find(s => s.id === appMode) || SYSTEM_CONFIGS[0];
 
@@ -1560,30 +1608,7 @@ export default function App() {
       )}
 
       {/* 🟢 實驗室成員管理 Modal（僅教師帳號） */}
-      {isMemberModalOpen && isOwner && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsMemberModalOpen(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-              <h3 className="text-xl font-bold text-blue-600 flex items-center gap-2"><UserCheck className="w-5 h-5"/> 實驗室成員管理</h3>
-              <button onClick={() => setIsMemberModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
-            </div>
-            <p className="text-sm text-slate-500 mb-4">加入學生的 Google Email，該學生即可用 Google 帳號登入系統選單並進行編輯。</p>
-            <form onSubmit={handleAddMember} className="flex gap-2 mb-5">
-              <input type="email" placeholder="student@gmail.com" value={memberInput} onChange={e=>setMemberInput(e.target.value)} className="flex-1 border border-slate-200 rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" required/>
-              <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-lg font-bold shadow-sm flex items-center gap-1"><Plus className="w-4 h-4"/> 邀請</button>
-            </form>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {memberEmails.length === 0 && <p className="text-sm text-slate-400 text-center py-4">尚未邀請任何學生</p>}
-              {memberEmails.map(email => (
-                <div key={email} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2.5 border border-slate-100">
-                  <span className="text-sm font-medium text-slate-700 truncate">{email}</span>
-                  <button onClick={() => handleRemoveMember(email)} title="移除授權" className="text-slate-400 hover:text-rose-500 p-1 transition-colors flex-shrink-0"><Trash2 className="w-4 h-4"/></button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      <MemberModal isOpen={isMemberModalOpen && isOwner} onClose={() => setIsMemberModalOpen(false)} memberEmails={memberEmails} memberInput={memberInput} setMemberInput={setMemberInput} onAdd={handleAddMember} onRemove={handleRemoveMember} />
 
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 w-64 bg-slate-900 text-slate-100 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
