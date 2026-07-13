@@ -37,6 +37,8 @@ import {
   Key, GripHorizontal
 } from 'lucide-react';
 
+import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
+
 // ==========================================
 // 🟢 您的 Firebase 設定
 // ==========================================
@@ -66,10 +68,8 @@ const SYSTEM_CONFIGS = [
 ];
 
 // --- 🟢 Google 授權設定 ---
-// 教師/管理者帳號直接寫死於程式碼（免邀請即可登入，解決「老師要先登入才能管理名單」的問題）
-const OWNER_EMAILS = ['jlpan0126@gmail.com', 'jlpan6666@gmail.com', 'jim635241@gmail.com'];
-const isOwnerEmail = (email) => OWNER_EMAILS.includes((email || '').toLowerCase());
-// 受邀學生名單（由教師於系統內管理）
+// 教師/管理者帳號與權限邏輯見 src/permissions.js
+// 成員名單（由教師於系統內管理）
 const membersDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'configs', 'authorized_members');
 
 // --- 🔵 工具函式：民國日期取得 ---
@@ -274,27 +274,79 @@ const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick }) =>
   </div>
 );
 
-// --- 元件：實驗室成員管理 Modal（僅教師帳號） ---
-const MemberModal = ({ isOpen, onClose, memberEmails, memberInput, setMemberInput, onAdd, onRemove }) => {
+// --- 元件：實驗室成員管理 Modal（僅老師/高權限帳號） ---
+const MemberModal = ({ isOpen, onClose, members, onAdd, onUpdate, onRemove }) => {
+  const emptyForm = { email: '', level: 'mid', systems: [...SYSTEM_IDS] };
+  const [form, setForm] = useState(emptyForm);
   if (!isOpen) return null;
+
+  const toggle = (arr, id) => arr.includes(id) ? arr.filter(s => s !== id) : [...arr, id];
+  const sysName = (id) => (SYSTEM_CONFIGS.find(s => s.id === id)?.name || id);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const ok = await onAdd(form);
+    if (ok) setForm(emptyForm);
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
           <h3 className="text-xl font-bold text-blue-600 flex items-center gap-2"><UserCheck className="w-5 h-5"/> 實驗室成員管理</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
         </div>
-        <p className="text-sm text-slate-500 mb-4">加入學生的 Google Email，該學生即可用 Google 帳號登入系統選單並進行編輯。</p>
-        <form onSubmit={onAdd} className="flex gap-2 mb-5">
-          <input type="email" placeholder="student@gmail.com" value={memberInput} onChange={e=>setMemberInput(e.target.value)} className="flex-1 border border-slate-200 rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" required/>
-          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-lg font-bold shadow-sm flex items-center gap-1"><Plus className="w-4 h-4"/> 邀請</button>
+
+        {/* 邀請表單 */}
+        <form onSubmit={submit} className="bg-slate-50 rounded-xl p-4 mb-5 space-y-3 border border-slate-100">
+          <input type="email" placeholder="student@gmail.com" value={form.email} onChange={e=>setForm({...form, email: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" required/>
+          <div>
+            <p className="text-xs font-bold text-slate-500 mb-1.5">可進入的系統</p>
+            <div className="flex flex-wrap gap-2">
+              {SYSTEM_IDS.map(id => (
+                <button type="button" key={id} onClick={()=>setForm({...form, systems: toggle(form.systems, id)})} className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${form.systems.includes(id) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-500 hover:border-blue-300'}`}>
+                  {sysName(id)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-slate-500 mb-1.5">權限等級</p>
+            <div className="flex gap-2">
+              {Object.entries(LEVEL_LABELS).map(([lv, label]) => (
+                <button type="button" key={lv} onClick={()=>setForm({...form, level: lv})} className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold border transition-colors ${form.level === lv ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-500 hover:border-blue-300'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-bold shadow-sm flex items-center justify-center gap-1"><Plus className="w-4 h-4"/> 邀請</button>
         </form>
-        <div className="space-y-2 max-h-60 overflow-y-auto">
-          {memberEmails.length === 0 && <p className="text-sm text-slate-400 text-center py-4">尚未邀請任何學生</p>}
-          {memberEmails.map(email => (
-            <div key={email} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2.5 border border-slate-100">
-              <span className="text-sm font-medium text-slate-700 truncate">{email}</span>
-              <button onClick={() => onRemove(email)} title="移除授權" className="text-slate-400 hover:text-rose-500 p-1 transition-colors flex-shrink-0"><Trash2 className="w-4 h-4"/></button>
+
+        {/* 成員清單（可就地調整等級與系統） */}
+        <div className="space-y-3 max-h-72 overflow-y-auto">
+          {members.length === 0 && <p className="text-sm text-slate-400 text-center py-4">尚未邀請任何學生</p>}
+          {members.map(m => (
+            <div key={m.email} className="bg-slate-50 rounded-xl px-3 py-3 border border-slate-100 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-bold text-slate-700 truncate">{m.email}</span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <select value={m.level} onChange={e=>onUpdate(m.email, { level: e.target.value })} className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white outline-none focus:border-blue-500">
+                    {Object.entries(LEVEL_LABELS).map(([lv, label]) => <option key={lv} value={lv}>{label}</option>)}
+                  </select>
+                  <button onClick={() => onRemove(m.email)} title="移除授權" className="text-slate-400 hover:text-rose-500 p-1 transition-colors"><Trash2 className="w-4 h-4"/></button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {SYSTEM_IDS.map(id => {
+                  const on = (m.systems || []).includes(id);
+                  return (
+                    <button key={id} onClick={()=>{ const next = toggle(m.systems || [], id); if (next.length === 0) return; onUpdate(m.email, { systems: next }); }} className={`px-2.5 py-1 rounded-md text-[11px] font-bold border transition-colors ${on ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-400 hover:border-blue-200'}`}>
+                      {sysName(id)}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </div>
@@ -304,7 +356,7 @@ const MemberModal = ({ isOpen, onClose, memberEmails, memberInput, setMemberInpu
 };
 
 // --- 頁面：多系統登入 ---
-const AuthScreen = ({ setAppMode, systemPasswords, user, isAuthorizedMember, membersLoaded, isOwner, memberEmails, memberInput, setMemberInput, onAddMember, onRemoveMember }) => {
+const AuthScreen = ({ setAppMode, systemPasswords, user, access, membersLoaded, isAdmin, members, onAddMember, onUpdateMember, onRemoveMember }) => {
   const [selectedSys, setSelectedSystem] = useState(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -348,7 +400,7 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, isAuthorizedMember, mem
   };
 
   // 🟢 第一道關卡：必須以 Google 登入並確認為實驗室成員，才能看到系統選單
-  if (!isAuthorizedMember) {
+  if (!access) {
     const rejected = isGoogleUser && membersLoaded; // 已登入 Google 但不在授權名單
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
@@ -394,13 +446,13 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, isAuthorizedMember, mem
           <>
             <div className="fixed inset-0 z-40" onClick={() => setIsGearOpen(false)}></div>
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-200">
-              {isOwner && <button onClick={() => { setIsMemberOpen(true); setIsGearOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
+              {isAdmin && <button onClick={() => { setIsMemberOpen(true); setIsGearOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
               <button onClick={() => { handleSwitchAccount(); setIsGearOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 flex items-center gap-3 text-rose-600 font-bold transition-colors"><LogOut className="w-4 h-4"/> 登出</button>
             </div>
           </>
         )}
       </div>
-      <MemberModal isOpen={isMemberOpen && isOwner} onClose={() => setIsMemberOpen(false)} memberEmails={memberEmails} memberInput={memberInput} setMemberInput={setMemberInput} onAdd={onAddMember} onRemove={onRemoveMember} />
+      <MemberModal isOpen={isMemberOpen && isAdmin} onClose={() => setIsMemberOpen(false)} members={members} onAdd={onAddMember} onUpdate={onUpdateMember} onRemove={onRemoveMember} />
 
       <div className="max-w-4xl w-full z-10">
         <div className="text-center mb-10">
@@ -550,14 +602,18 @@ export default function App() {
   const [isPwdModalOpen, setIsPwdModalOpen] = useState(false);
   const [pwdForm, setPwdForm] = useState({ old: '', new: '', confirm: '' });
 
-  // 🟢 實驗室成員授權管理
+  // 🟢 實驗室成員授權管理（權限邏輯見 src/permissions.js）
   const userEmail = (user?.email || '').toLowerCase();
-  const isOwner = !!user && !user.isAnonymous && isOwnerEmail(userEmail);
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
-  const [memberEmails, setMemberEmails] = useState([]);
+  const [members, setMembers] = useState([]);
   const [membersLoaded, setMembersLoaded] = useState(false);
-  const [memberInput, setMemberInput] = useState('');
-  const isAuthorizedMember = isOwner || (!!user && !user.isAnonymous && memberEmails.map(e => e.toLowerCase()).includes(userEmail));
+  const access = useMemo(
+    () => (!user || user.isAnonymous ? null : getAccess(userEmail, members)),
+    [user, userEmail, members]
+  );
+  const isAuthorizedMember = !!access;
+  const isAdmin = access?.level === 'high';           // 同老師：成員管理、更改密碼
+  const canEdit = !!access && access.level !== 'low'; // 低權限 = 唯讀
 
   // DB Path Helpers
   const colSessionsName = appMode === 'lab' ? 'sessions' : `sessions_${appMode}`;
@@ -606,17 +662,22 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(membersDocRef(), snap => {
-      setMemberEmails(snap.exists() ? (snap.data().emails || []) : []);
+      setMembers(normalizeMembers(snap.exists() ? snap.data() : null));
       setMembersLoaded(true);
     });
     return () => unsub();
   }, [user]);
 
-  // 🟢 授權複查：名單載入後，持有系統模式但已非授權成員者一律退回登入閘門（移除授權即時生效）
+  // 🟢 授權複查：非成員 → 登出；成員但無此系統權限 → 退回選單（移除/降權即時生效）
   useEffect(() => {
     if (!appMode || !user || !membersLoaded) return;
-    if (!isAuthorizedMember) handleLogout();
-  }, [appMode, user, membersLoaded, isAuthorizedMember]);
+    if (!access) { handleLogout(); return; }
+    if (!access.systems.includes(appMode)) {
+      localStorage.removeItem('appMode');
+      setAppMode(null);
+      showToast('您沒有進入此系統的權限', 'error');
+    }
+  }, [appMode, user, membersLoaded, access]);
 
   // Reset Filters, Selection & Navigation on Mode Change
   useEffect(() => {
@@ -786,6 +847,13 @@ export default function App() {
   }, [user, appMode, currentSession, isLab, colItemsName]);
 
   const showToast = (msg, type='success') => setToast({message: msg, type});
+
+  // 🟢 寫入防護：低權限（唯讀）一律擋下並提示
+  const guardWrite = () => {
+    if (canEdit) return true;
+    showToast('您為唯讀權限，無法執行此操作', 'error');
+    return false;
+  };
   
   const handleLogout = () => {
     localStorage.removeItem('appMode');
@@ -794,25 +862,34 @@ export default function App() {
     if (user && !user.isAnonymous) signOut(auth).catch(console.error);
   };
 
-  // 🟢 新增 / 移除受邀成員 Email（僅教師帳號可操作）
-  const handleAddMember = async (e) => {
-    e.preventDefault();
-    const email = memberInput.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showToast("Email 格式錯誤", "error");
-    if (isOwnerEmail(email)) return showToast("教師帳號無需邀請", "error");
-    if (memberEmails.map(m => m.toLowerCase()).includes(email)) return showToast("此 Email 已在名單中", "error");
+  // 🟢 新增 / 更新 / 移除成員（僅老師/高權限可操作）
+  const handleAddMember = async (form) => {
+    if (!isAdmin) { showToast('僅老師可管理成員', 'error'); return false; }
+    const email = (form.email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Email 格式錯誤', 'error'); return false; }
+    if (isOwnerEmail(email)) { showToast('教師帳號無需邀請', 'error'); return false; }
+    if (members.some(m => (m.email || '').toLowerCase() === email)) { showToast('此 Email 已在名單中', 'error'); return false; }
+    if (!form.systems || form.systems.length === 0) { showToast('請至少勾選一個系統', 'error'); return false; }
     try {
-      await setDoc(membersDocRef(), { emails: [...memberEmails, email] }, { merge: true });
-      setMemberInput('');
-      showToast("已加入成員名單，該學生即可用此 Google 帳號登入");
-    } catch (err) { console.error(err); showToast("新增失敗", "error"); }
+      await setDoc(membersDocRef(), { members: [...members, { email, level: form.level, systems: form.systems }] }, { merge: true });
+      showToast('已加入成員名單，該學生即可用此 Google 帳號登入');
+      return true;
+    } catch (err) { console.error(err); showToast('新增失敗', 'error'); return false; }
+  };
+
+  const handleUpdateMember = async (email, patch) => {
+    if (!isAdmin) { showToast('僅老師可管理成員', 'error'); return; }
+    const next = members.map(m => m.email === email ? { ...m, ...patch } : m);
+    try { await setDoc(membersDocRef(), { members: next }, { merge: true }); }
+    catch (err) { console.error(err); showToast('更新失敗', 'error'); }
   };
 
   const handleRemoveMember = async (email) => {
+    if (!isAdmin) { showToast('僅老師可管理成員', 'error'); return; }
     try {
-      await setDoc(membersDocRef(), { emails: memberEmails.filter(m => m !== email) }, { merge: true });
-      showToast("已移除授權");
-    } catch (err) { console.error(err); showToast("移除失敗", "error"); }
+      await setDoc(membersDocRef(), { members: members.filter(m => m.email !== email) }, { merge: true });
+      showToast('已移除授權');
+    } catch (err) { console.error(err); showToast('移除失敗', 'error'); }
   };
 
   const handlePwdSubmit = async (e) => {
@@ -1570,7 +1647,7 @@ export default function App() {
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-teal-600 font-medium animate-pulse">系統環境載入中...</div>;
-  if (!user || !appMode || !isAuthorizedMember) return <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} isAuthorizedMember={isAuthorizedMember} membersLoaded={membersLoaded} isOwner={isOwner} memberEmails={memberEmails} memberInput={memberInput} setMemberInput={setMemberInput} onAddMember={handleAddMember} onRemoveMember={handleRemoveMember} />;
+  if (!user || !appMode || !isAuthorizedMember) return <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} access={access} membersLoaded={membersLoaded} isAdmin={isAdmin} members={members} onAddMember={handleAddMember} onUpdateMember={handleUpdateMember} onRemoveMember={handleRemoveMember} />;
 
   const SysConfig = SYSTEM_CONFIGS.find(s => s.id === appMode) || SYSTEM_CONFIGS[0];
 
@@ -1608,7 +1685,7 @@ export default function App() {
       )}
 
       {/* 🟢 實驗室成員管理 Modal（僅教師帳號） */}
-      <MemberModal isOpen={isMemberModalOpen && isOwner} onClose={() => setIsMemberModalOpen(false)} memberEmails={memberEmails} memberInput={memberInput} setMemberInput={setMemberInput} onAdd={handleAddMember} onRemove={handleRemoveMember} />
+      <MemberModal isOpen={isMemberModalOpen && isAdmin} onClose={() => setIsMemberModalOpen(false)} members={members} onAdd={handleAddMember} onUpdate={handleUpdateMember} onRemove={handleRemoveMember} />
 
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 w-64 bg-slate-900 text-slate-100 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
@@ -1715,7 +1792,7 @@ export default function App() {
                     )}
 
                     {/* 全域選項 */}
-                    {isOwner && <button onClick={() => { setIsMemberModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
+                    {isAdmin && <button onClick={() => { setIsMemberModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
                     <button onClick={() => { setIsPwdModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Key className="w-4 h-4 text-indigo-600"/> 更改系統密碼</button>
                     <button onClick={() => { handleLogout(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 flex items-center gap-3 text-rose-600 font-bold transition-colors"><LogOut className="w-4 h-4"/> 登出系統</button>
                   </div>
