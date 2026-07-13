@@ -459,14 +459,14 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, access, membersLoaded, 
           <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-3 tracking-tight">整合管理系統入口</h1>
           <p className="text-slate-500">請選擇您要進入的系統模組</p>
           <p className="text-xs text-slate-400 mt-2 flex items-center justify-center gap-2">
-            <UserCheck className="w-3.5 h-3.5 text-teal-500"/> 已驗證成員：{user?.email}
+            <UserCheck className="w-3.5 h-3.5 text-teal-500"/> 已驗證成員：{user?.email}（{LEVEL_LABELS[access.level]}）
             <button onClick={handleSwitchAccount} className="underline hover:text-slate-600 transition-colors">登出</button>
           </p>
         </div>
 
         {!selectedSys ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {SYSTEM_CONFIGS.map(sys => {
+          <div className={`grid grid-cols-1 gap-6 ${access.systems.length >= 3 ? 'md:grid-cols-3' : access.systems.length === 2 ? 'md:grid-cols-2 max-w-2xl mx-auto' : 'max-w-sm mx-auto'}`}>
+            {SYSTEM_CONFIGS.filter(sys => access.systems.includes(sys.id)).map(sys => {
               const Icon = sys.icon;
               const direct = sys.id === 'property_jl'; // 🟢 建良老師系統：成員免密碼直接進入
               return (
