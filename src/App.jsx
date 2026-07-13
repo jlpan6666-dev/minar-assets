@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  onAuthStateChanged, 
+import {
+  getAuth,
+  onAuthStateChanged,
   signOut,
-  signInAnonymously
+  signInAnonymously,
+  GoogleAuthProvider,
+  signInWithPopup
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -62,6 +64,13 @@ const SYSTEM_CONFIGS = [
   { id: 'property_jl', name: '建良老師設備管理', icon: Box, pwd: 'jlpan@314', colorClass: 'bg-blue-600', hoverClass: 'hover:bg-blue-700', textClass: 'text-blue-600' },
   { id: 'property_kung', name: '龔老師財產盤點', icon: Box, pwd: 'kung7917', colorClass: 'bg-indigo-600', hoverClass: 'hover:bg-indigo-700', textClass: 'text-indigo-600' }
 ];
+
+// --- 🟢 Google 授權設定 ---
+// 教師/管理者帳號直接寫死於程式碼（免邀請即可登入，解決「老師要先登入才能管理名單」的問題）
+const OWNER_EMAILS = ['jlpan0126@gmail.com', 'jim635241@gmail.com'];
+const isOwnerEmail = (email) => OWNER_EMAILS.includes((email || '').toLowerCase());
+// 受邀學生名單（由教師於系統內管理）
+const membersDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'configs', 'authorized_members');
 
 // --- 🔵 工具函式：民國日期取得 ---
 const getMinguoDateString = () => {
@@ -266,10 +275,13 @@ const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick }) =>
 );
 
 // --- 頁面：多系統登入 ---
-const AuthScreen = ({ setAppMode, systemPasswords }) => {
+const AuthScreen = ({ setAppMode, systemPasswords, user, isAuthorizedMember, membersLoaded }) => {
   const [selectedSys, setSelectedSystem] = useState(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const isGoogleUser = user && !user.isAnonymous;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -280,6 +292,63 @@ const AuthScreen = ({ setAppMode, systemPasswords }) => {
     setAppMode(selectedSys.id);
   };
 
+  // 🟢 Google 登入：授權結果由 App 監聽成員名單後自動判定
+  const handleGoogleLogin = async () => {
+    setError('');
+    setGoogleLoading(true);
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (e) {
+      if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+        console.error(e);
+        setError('Google 登入失敗，請稍後再試');
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleSwitchAccount = () => signOut(auth).catch(console.error);
+
+  // 建良老師系統：成員已通過 Google 驗證，直接進入
+  const enterDirect = (sysId) => {
+    localStorage.setItem('appMode', sysId);
+    setAppMode(sysId);
+  };
+
+  // 🟢 第一道關卡：必須以 Google 登入並確認為實驗室成員，才能看到系統選單
+  if (!isAuthorizedMember) {
+    const rejected = isGoogleUser && membersLoaded; // 已登入 Google 但不在授權名單
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
+        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-200/30 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="max-w-md w-full z-10 bg-white rounded-2xl shadow-xl p-8 text-center animate-in zoom-in-95 duration-300">
+          <h1 className="text-2xl font-extrabold text-slate-800 mb-2 tracking-tight">整合管理系統入口</h1>
+          <p className="text-slate-500 text-sm mb-8">請使用 Google 帳號登入，確認實驗室成員身分後才能進入系統選單</p>
+          {isGoogleUser && !membersLoaded ? (
+            <p className="text-slate-400 animate-pulse py-3">驗證成員身分中...</p>
+          ) : rejected ? (
+            <div className="space-y-4">
+              <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center justify-center gap-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0"/> 此帳號 ({user.email}) 未獲授權，請聯絡老師將您加入成員名單
+              </div>
+              <button onClick={handleSwitchAccount} className="w-full border-2 border-slate-200 py-3 rounded-xl font-bold text-slate-700 hover:bg-slate-50 transition-colors">改用其他帳號登入</button>
+            </div>
+          ) : (
+            <>
+              <button type="button" onClick={handleGoogleLogin} disabled={googleLoading} className="w-full flex items-center justify-center gap-3 border-2 border-slate-200 py-3.5 rounded-xl font-bold text-slate-700 hover:bg-slate-50 hover:border-blue-300 transition-colors shadow-sm disabled:opacity-50">
+                <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1A6.6 6.6 0 0 1 5.5 12c0-.73.13-1.44.34-2.1V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.07.56 4.21 1.65l3.16-3.16A11 11 0 0 0 12 1 11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+                {googleLoading ? '登入中...' : '使用 Google 帳號登入'}
+              </button>
+              {error && <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center justify-center gap-2"><AlertTriangle className="w-4 h-4"/> {error}</div>}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-200/30 rounded-full blur-3xl pointer-events-none"></div>
@@ -288,20 +357,25 @@ const AuthScreen = ({ setAppMode, systemPasswords }) => {
       <div className="max-w-4xl w-full z-10">
         <div className="text-center mb-10">
           <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-3 tracking-tight">整合管理系統入口</h1>
-          <p className="text-slate-500">請選擇您要進入的系統模組並輸入專屬管理密碼</p>
+          <p className="text-slate-500">請選擇您要進入的系統模組</p>
+          <p className="text-xs text-slate-400 mt-2 flex items-center justify-center gap-2">
+            <UserCheck className="w-3.5 h-3.5 text-teal-500"/> 已驗證成員：{user?.email}
+            <button onClick={handleSwitchAccount} className="underline hover:text-slate-600 transition-colors">登出</button>
+          </p>
         </div>
 
         {!selectedSys ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {SYSTEM_CONFIGS.map(sys => {
               const Icon = sys.icon;
+              const direct = sys.id === 'property_jl'; // 🟢 建良老師系統：成員免密碼直接進入
               return (
-                <div key={sys.id} onClick={() => setSelectedSystem(sys)} className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:-translate-y-2 transition-all group flex flex-col items-center text-center">
+                <div key={sys.id} onClick={() => direct ? enterDirect(sys.id) : setSelectedSystem(sys)} className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:-translate-y-2 transition-all group flex flex-col items-center text-center">
                   <div className={`w-20 h-20 rounded-2xl flex items-center justify-center mb-6 shadow-md transition-transform group-hover:scale-110 ${sys.colorClass}`}>
                     <Icon className="w-10 h-10 text-white" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800 mb-2">{sys.name}</h3>
-                  <p className="text-sm text-slate-400">點擊進入登入頁面</p>
+                  <p className="text-sm text-slate-400">{direct ? '點擊直接進入 (成員已驗證)' : '點擊進入登入頁面'}</p>
                 </div>
               );
             })}
@@ -428,6 +502,15 @@ export default function App() {
   const [isPwdModalOpen, setIsPwdModalOpen] = useState(false);
   const [pwdForm, setPwdForm] = useState({ old: '', new: '', confirm: '' });
 
+  // 🟢 實驗室成員授權管理
+  const userEmail = (user?.email || '').toLowerCase();
+  const isOwner = !!user && !user.isAnonymous && isOwnerEmail(userEmail);
+  const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
+  const [memberEmails, setMemberEmails] = useState([]);
+  const [membersLoaded, setMembersLoaded] = useState(false);
+  const [memberInput, setMemberInput] = useState('');
+  const isAuthorizedMember = isOwner || (!!user && !user.isAnonymous && memberEmails.map(e => e.toLowerCase()).includes(userEmail));
+
   // DB Path Helpers
   const colSessionsName = appMode === 'lab' ? 'sessions' : `sessions_${appMode}`;
   const colTablesName = appMode === 'lab' ? null : `tables_${appMode}`; 
@@ -470,6 +553,22 @@ export default function App() {
     });
     return () => unsub();
   }, [user]);
+
+  // 🟢 監聽授權成員名單（登入閘門與成員管理共用；匿名帳號也需讀取以供閘門判定）
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(membersDocRef(), snap => {
+      setMemberEmails(snap.exists() ? (snap.data().emails || []) : []);
+      setMembersLoaded(true);
+    });
+    return () => unsub();
+  }, [user]);
+
+  // 🟢 授權複查：名單載入後，持有系統模式但已非授權成員者一律退回登入閘門（移除授權即時生效）
+  useEffect(() => {
+    if (!appMode || !user || !membersLoaded) return;
+    if (!isAuthorizedMember) handleLogout();
+  }, [appMode, user, membersLoaded, isAuthorizedMember]);
 
   // Reset Filters, Selection & Navigation on Mode Change
   useEffect(() => {
@@ -640,9 +739,32 @@ export default function App() {
 
   const showToast = (msg, type='success') => setToast({message: msg, type});
   
-  const handleLogout = () => { 
-    localStorage.removeItem('appMode'); 
-    setAppMode(null); 
+  const handleLogout = () => {
+    localStorage.removeItem('appMode');
+    setAppMode(null);
+    // Google 帳號登出後，onAuthStateChanged 會自動改回匿名登入
+    if (user && !user.isAnonymous) signOut(auth).catch(console.error);
+  };
+
+  // 🟢 新增 / 移除受邀成員 Email（僅教師帳號可操作）
+  const handleAddMember = async (e) => {
+    e.preventDefault();
+    const email = memberInput.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showToast("Email 格式錯誤", "error");
+    if (isOwnerEmail(email)) return showToast("教師帳號無需邀請", "error");
+    if (memberEmails.map(m => m.toLowerCase()).includes(email)) return showToast("此 Email 已在名單中", "error");
+    try {
+      await setDoc(membersDocRef(), { emails: [...memberEmails, email] }, { merge: true });
+      setMemberInput('');
+      showToast("已加入成員名單，該學生即可用此 Google 帳號登入");
+    } catch (err) { console.error(err); showToast("新增失敗", "error"); }
+  };
+
+  const handleRemoveMember = async (email) => {
+    try {
+      await setDoc(membersDocRef(), { emails: memberEmails.filter(m => m !== email) }, { merge: true });
+      showToast("已移除授權");
+    } catch (err) { console.error(err); showToast("移除失敗", "error"); }
   };
 
   const handlePwdSubmit = async (e) => {
@@ -1400,7 +1522,7 @@ export default function App() {
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-teal-600 font-medium animate-pulse">系統環境載入中...</div>;
-  if (!user || !appMode) return <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} />;
+  if (!user || !appMode || !isAuthorizedMember) return <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} isAuthorizedMember={isAuthorizedMember} membersLoaded={membersLoaded} />;
 
   const SysConfig = SYSTEM_CONFIGS.find(s => s.id === appMode) || SYSTEM_CONFIGS[0];
 
@@ -1433,6 +1555,32 @@ export default function App() {
               <div><label className="text-sm font-bold text-slate-700 block mb-1">確認新密碼</label><input type="password" value={pwdForm.confirm} onChange={e=>setPwdForm({...pwdForm, confirm:e.target.value})} className={`w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500`} required/></div>
               <button type="submit" className={`w-full text-white py-3 rounded-xl font-bold shadow-md mt-4 transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>確認更改</button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 實驗室成員管理 Modal（僅教師帳號） */}
+      {isMemberModalOpen && isOwner && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsMemberModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+              <h3 className="text-xl font-bold text-blue-600 flex items-center gap-2"><UserCheck className="w-5 h-5"/> 實驗室成員管理</h3>
+              <button onClick={() => setIsMemberModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
+            </div>
+            <p className="text-sm text-slate-500 mb-4">加入學生的 Google Email，該學生即可用 Google 帳號登入系統選單並進行編輯。</p>
+            <form onSubmit={handleAddMember} className="flex gap-2 mb-5">
+              <input type="email" placeholder="student@gmail.com" value={memberInput} onChange={e=>setMemberInput(e.target.value)} className="flex-1 border border-slate-200 rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" required/>
+              <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-lg font-bold shadow-sm flex items-center gap-1"><Plus className="w-4 h-4"/> 邀請</button>
+            </form>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {memberEmails.length === 0 && <p className="text-sm text-slate-400 text-center py-4">尚未邀請任何學生</p>}
+              {memberEmails.map(email => (
+                <div key={email} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2.5 border border-slate-100">
+                  <span className="text-sm font-medium text-slate-700 truncate">{email}</span>
+                  <button onClick={() => handleRemoveMember(email)} title="移除授權" className="text-slate-400 hover:text-rose-500 p-1 transition-colors flex-shrink-0"><Trash2 className="w-4 h-4"/></button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -1542,6 +1690,7 @@ export default function App() {
                     )}
 
                     {/* 全域選項 */}
+                    {isOwner && <button onClick={() => { setIsMemberModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
                     <button onClick={() => { setIsPwdModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Key className="w-4 h-4 text-indigo-600"/> 更改系統密碼</button>
                     <button onClick={() => { handleLogout(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 flex items-center gap-3 text-rose-600 font-bold transition-colors"><LogOut className="w-4 h-4"/> 登出系統</button>
                   </div>
