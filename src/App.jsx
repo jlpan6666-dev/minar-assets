@@ -894,6 +894,7 @@ export default function App() {
 
   const handlePwdSubmit = async (e) => {
     e.preventDefault();
+    if (!isAdmin) return showToast('僅老師可更改系統密碼', 'error');
     const correctOld = systemPasswords[appMode];
     if (pwdForm.old !== correctOld) return showToast("目前密碼錯誤", "error");
     if (pwdForm.new !== pwdForm.confirm) return showToast("新密碼輸入不一致", "error");
@@ -922,6 +923,7 @@ export default function App() {
   };
 
   const handleImportExcel = async (e) => {
+    if (!guardWrite()) return;
     const file = e.target.files[0];
     if (!file || !currentSession || isLab || !currentTable) return;
     
@@ -1056,6 +1058,7 @@ export default function App() {
   };
 
   const deleteSession = (id) => {
+    if (!guardWrite()) return;
     setConfirmDialog({
       isOpen: true,
       title: "刪除清單",
@@ -1100,6 +1103,7 @@ export default function App() {
   };
 
   const handleDeleteSelected = () => {
+    if (!guardWrite()) return;
     setConfirmDialog({
         isOpen: true,
         title: "批次刪除確認",
@@ -1125,6 +1129,7 @@ export default function App() {
 
   const handleSaveTable = async (e) => {
     e.preventDefault();
+    if (!guardWrite()) return;
     try {
         if (editItem) { 
             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', colTablesName, editItem.id), { name: tableForm.name, updatedAt: serverTimestamp() });
@@ -1143,6 +1148,7 @@ export default function App() {
   };
 
   const deleteTable = (id) => {
+    if (!guardWrite()) return;
     setConfirmDialog({
         isOpen: true,
         title: "刪除表單",
@@ -1169,6 +1175,7 @@ export default function App() {
 
   const handleSaveSession = async (e) => {
     e.preventDefault();
+    if (!guardWrite()) return;
     try {
       const sName = isLab ? sessionForm.name : `${sessionForm.year}年度-${sessionForm.stage}`;
       const basePayload = { name: sName, date: sessionForm.date, createdBy: user.uid, ...(isLab ? {} : { year: sessionForm.year, stage: sessionForm.stage }) };
@@ -1238,6 +1245,7 @@ export default function App() {
   
   const handleSaveItem = async (e) => {
     e.preventDefault();
+    if (!guardWrite()) return;
     if (!currentSession) return;
     if (!isLab && !currentTable) { showToast("請先建立並選擇表單", "error"); return; }
     if (isCompressing) { showToast("圖片正在處理中...", "error"); return; }
@@ -1263,6 +1271,7 @@ export default function App() {
 
   const togglePropertyStatus = async (item) => {
     if (isLab) return;
+    if (!guardWrite()) return;
     const newStatus = item.status === '已盤點' ? '未盤點' : '已盤點';
     try {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', colItemsName, item.id), { status: newStatus, updatedAt: serverTimestamp() });
@@ -1271,7 +1280,26 @@ export default function App() {
   };
 
   const deleteItem = (id) => {
+    if (!guardWrite()) return;
     setConfirmDialog({ isOpen: true, title: "刪除確認", message: "確定要刪除這筆資料嗎？", isDangerous: true, action: async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colItemsName, id)); setConfirmDialog(p => ({...p, isOpen: false})); showToast("已刪除"); } });
+  };
+
+  // 🟢 分類儲存/刪除（原程式引用但未定義，補上實作）
+  const handleSaveCategory = async (e) => {
+    e.preventDefault();
+    if (!guardWrite()) return;
+    if (!catForm.name.trim()) return;
+    try {
+      if (editItem) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', editItem.id), { name: catForm.name.trim() });
+      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), { name: catForm.name.trim(), createdAt: serverTimestamp() });
+      setIsModalOpen(false);
+      showToast(editItem ? "分類已更新" : "分類已新增");
+    } catch (err) { console.error(err); showToast("儲存失敗", "error"); }
+  };
+
+  const handleDeleteCategory = (id) => {
+    if (!guardWrite()) return;
+    setConfirmDialog({ isOpen: true, title: "刪除確認", message: "確定要刪除此分類嗎？", isDangerous: true, action: async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', id)); setConfirmDialog(p => ({...p, isOpen: false})); showToast("已刪除"); } });
   };
 
   // --- Filtering & Sorting ---
@@ -1351,6 +1379,7 @@ export default function App() {
 
   const initiateAddToCart = (item) => { const avail = getAvailability(item); if(avail<=0){showToast("已無庫存","error");return;} setSelectQuantityDialog({ isOpen: true, item }); };
   const confirmAddToCart = (item, qty) => {
+    if (!guardWrite()) return;
     const existing = cartItems.find(c => c.id === item.id); const avail = getAvailability(item);
     if (existing) {
       if (existing.borrowQty + qty <= avail) { setCartItems(cartItems.map(c => c.id === item.id ? { ...c, borrowQty: existing.borrowQty + qty } : c)); showToast(`已追加`); }
@@ -1359,8 +1388,8 @@ export default function App() {
     setSelectQuantityDialog({ isOpen: false, item: null });
   };
   const updateCartQty = (id, delta) => { setCartItems(cartItems.map(c => { if(c.id === id) { const n = c.borrowQty + delta; if(n > 0 && n <= c.maxQty) return {...c, borrowQty: n}; } return c; })); };
-  const handleBatchBorrow = async (e) => { 
-    e.preventDefault(); if (!currentSession) return; if (!cartItems.length) { showToast("請先加入設備", "error"); return; }
+  const handleBatchBorrow = async (e) => {
+    e.preventDefault(); if (!guardWrite()) return; if (!currentSession) return; if (!cartItems.length) { showToast("請先加入設備", "error"); return; }
     try { 
       const promises = cartItems.map(item => {
         addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'loans'), { sessionId: currentSession.id, equipmentId: item.id, equipmentName: item.name, borrower: borrowForm.borrower, phone: borrowForm.phone, purpose: borrowForm.purpose, quantity: item.borrowQty, borrowDays: borrowForm.borrowDays, borrowDate: borrowForm.date, returnDate: null, status: 'borrowed', createdAt: serverTimestamp(), updatedAt: serverTimestamp() }); 
@@ -1370,6 +1399,7 @@ export default function App() {
     } catch (err) { showToast("借用失敗", "error"); } 
   };
   const handleReturnConfirm = async (loanId, returnQty, originalQty) => {
+    if (!guardWrite()) return;
     try {
         const loanDoc = loans.find(l => l.id === loanId); if (!loanDoc) return;
         if (returnQty >= originalQty) {
@@ -1500,6 +1530,7 @@ export default function App() {
   };
 
   const handleAddLayoutItem = async (type) => {
+      if (!guardWrite()) return;
       if (!currentSession) return;
       const typeLabels = { computer: '電腦', server: '伺服器', printer: '印表機', desk: '辦公桌', aisle: '走道' };
       
@@ -1528,7 +1559,8 @@ export default function App() {
   };
 
   const handleLayoutPointerDown = (e, item) => {
-      e.stopPropagation(); 
+      if (!canEdit) return; // 唯讀：靜默擋下拖曳
+      e.stopPropagation();
       e.currentTarget.setPointerCapture(e.pointerId);
       setDragState({ id: item.id, startX: e.clientX, startY: e.clientY, initX: item.x, initY: item.y });
   };
@@ -1564,6 +1596,7 @@ export default function App() {
 
   // 🟢 走道拉伸變形邏輯 (Resize handlers)
   const handleResizePointerDown = (e, item) => {
+      if (!canEdit) return; // 唯讀：靜默擋下縮放
       e.stopPropagation();
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -1613,6 +1646,7 @@ export default function App() {
   };
 
   const handleDeleteLayoutItem = async (id) => {
+      if (!guardWrite()) return;
       try {
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', id));
           showToast("已刪除配置");
@@ -1628,6 +1662,7 @@ export default function App() {
 
   const handleSaveLayoutLabel = async (e) => {
       e.preventDefault();
+      if (!guardWrite()) return;
       if (!editItem) return;
       try {
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'layouts', editItem.id), { label: layoutForm.label });
@@ -1666,8 +1701,8 @@ export default function App() {
         </div>
       )}
 
-      {/* 🟢 密碼更改 Modal */}
-      {isPwdModalOpen && (
+      {/* 🟢 密碼更改 Modal（僅老師/高權限） */}
+      {isPwdModalOpen && isAdmin && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsPwdModalOpen(false)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
@@ -1708,7 +1743,7 @@ export default function App() {
               <button onClick={() => { setViewMode('items'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'items' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><LayoutGrid className="w-5 h-5" /> {isLab ? '設備列表' : '財產總覽'}</button>
               {isLab && (
                 <>
-                <button onClick={() => { setViewMode('borrow-request'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'borrow-request' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><ShoppingCart className="w-5 h-5" /> 借用登記</button>
+                {canEdit && <button onClick={() => { setViewMode('borrow-request'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'borrow-request' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><ShoppingCart className="w-5 h-5" /> 借用登記</button>}
                 <button onClick={() => { setViewMode('loans'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'loans' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><History className="w-5 h-5" /> 借還紀錄表</button>
                 <button onClick={() => { setViewMode('layout'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'layout' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><Map className="w-5 h-5" /> 實驗室配置圖</button>
                 </>
@@ -1754,21 +1789,21 @@ export default function App() {
                   <button onClick={() => handleExportExcel(currentSession, true)} disabled={selectedItemIds.length === 0} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
                     <FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline font-bold">匯出選定</span>
                   </button>
-                  <button onClick={handleDeleteSelected} disabled={selectedItemIds.length === 0} className="bg-white border border-slate-200 text-rose-600 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-rose-50 shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {canEdit && <button onClick={handleDeleteSelected} disabled={selectedItemIds.length === 0} className="bg-white border border-slate-200 text-rose-600 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-rose-50 shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
                     <Trash2 className="w-4 h-4"/> <span className="hidden sm:inline font-bold">刪除選定</span>
-                  </button>
+                  </button>}
                   <button onClick={() => { setIsSelectionMode(false); setSelectedItemIds([]); }} className="bg-slate-100 border border-slate-200 text-slate-600 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-200 shadow-sm transition-all active:scale-95">
                     <X className="w-4 h-4"/> <span className="hidden sm:inline font-bold">取消</span>
                   </button>
                 </div>
               ) : (
                 <>
-                {(isLab || currentTable) && <button onClick={()=>openItemModal()} className={`text-white px-3 py-2.5 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>}
+                {canEdit && (isLab || currentTable) && <button onClick={()=>openItemModal()} className={`text-white px-3 py-2.5 md:px-4 rounded-lg flex items-center gap-2 shadow-sm font-bold transition-all active:scale-95 ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> <span className="hidden sm:inline">{isLab ? '新增設備' : '新增財產'}</span><span className="inline sm:hidden">新增</span></button>}
                 </>
               )
             )}
-            {viewMode === 'sessions' && <button onClick={()=>openSessionModal()} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增清單</button>}
-            {viewMode === 'categories' && <button onClick={()=>{setModalType('category');setEditItem(null);setCatForm({name:''});setIsModalOpen(true)}} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增分類</button>}
+            {viewMode === 'sessions' && canEdit && <button onClick={()=>openSessionModal()} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增清單</button>}
+            {viewMode === 'categories' && canEdit && <button onClick={()=>{setModalType('category');setEditItem(null);setCatForm({name:''});setIsModalOpen(true)}} className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold shadow-sm ${SysConfig.colorClass} ${SysConfig.hoverClass}`}><Plus className="w-4 h-4"/> 新增分類</button>}
 
             {/* 🟢 整合的齒輪管理選單 */}
             <div className="relative ml-1 pl-2 border-l border-slate-200">
@@ -1784,7 +1819,7 @@ export default function App() {
                     {viewMode === 'items' && !isSelectionMode && (
                       <>
                         <button onClick={() => { handleExportExcel(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出清單 Excel</button>
-                        {!isLab && currentTable && (
+                        {canEdit && !isLab && currentTable && (
                           <button onClick={() => { setIsActionMenuOpen(false); fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel 資料</button>
                         )}
                         <div className="h-px bg-slate-100 my-1 mx-2"></div>
@@ -1793,7 +1828,7 @@ export default function App() {
 
                     {/* 全域選項 */}
                     {isAdmin && <button onClick={() => { setIsMemberModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
-                    <button onClick={() => { setIsPwdModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Key className="w-4 h-4 text-indigo-600"/> 更改系統密碼</button>
+                    {isAdmin && <button onClick={() => { setIsPwdModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Key className="w-4 h-4 text-indigo-600"/> 更改系統密碼</button>}
                     <button onClick={() => { handleLogout(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 flex items-center gap-3 text-rose-600 font-bold transition-colors"><LogOut className="w-4 h-4"/> 登出系統</button>
                   </div>
                 </>
@@ -1869,8 +1904,10 @@ export default function App() {
                     <span className="text-[10px] text-slate-400 font-mono tracking-wider">ID: {sess.id.slice(0,8)}</span>
                     <div className="flex gap-1">
                       <button onClick={(e)=>{e.stopPropagation(); handleExportExcel(sess);}} className={`p-2 rounded-lg text-slate-400 hover:bg-slate-200 ${SysConfig.textClass.replace('text-','hover:text-')} transition-colors`} title="匯出 Excel"><FileDown className="w-4 h-4"/></button>
+                      {canEdit && <>
                       <button onClick={(e)=>{e.stopPropagation();openSessionModal(sess)}} className={`p-2 rounded-lg text-slate-400 hover:bg-slate-200 ${SysConfig.textClass.replace('text-','hover:text-')} transition-colors`}><Edit2 className="w-4 h-4"/></button>
                       <button onClick={(e)=>{e.stopPropagation();deleteSession(sess.id)}} className="p-2 rounded-lg text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition-colors"><Trash2 className="w-4 h-4"/></button>
+                      </>}
                     </div>
                   </div>
                 </div>
@@ -1893,7 +1930,7 @@ export default function App() {
                       className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all border ${currentTable?.id === t.id ? `${SysConfig.colorClass} border-transparent text-white shadow-md` : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
                     >
                       {t.name}
-                      {currentTable?.id === t.id && (
+                      {currentTable?.id === t.id && canEdit && (
                         <div className="flex items-center gap-1 ml-2 pl-2 border-l border-white/30">
                           <Edit2 className="w-3.5 h-3.5 hover:scale-125 transition-transform cursor-pointer" onClick={(e) => { e.stopPropagation(); openTableModal(t); }} />
                           <Trash2 className="w-3.5 h-3.5 hover:scale-125 transition-transform text-rose-200 hover:text-white cursor-pointer" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }} />
@@ -1901,9 +1938,9 @@ export default function App() {
                       )}
                     </button>
                   ))}
-                  <button onClick={() => openTableModal()} className="px-5 py-2.5 rounded-xl font-bold whitespace-nowrap border-2 border-dashed border-slate-300 text-slate-500 hover:bg-slate-100 hover:border-slate-400 flex items-center gap-1.5 transition-colors bg-white">
+                  {canEdit && <button onClick={() => openTableModal()} className="px-5 py-2.5 rounded-xl font-bold whitespace-nowrap border-2 border-dashed border-slate-300 text-slate-500 hover:bg-slate-100 hover:border-slate-400 flex items-center gap-1.5 transition-colors bg-white">
                     <Plus className="w-4 h-4"/> 新增表單
-                  </button>
+                  </button>}
                 </div>
               )}
 
@@ -1912,7 +1949,7 @@ export default function App() {
                     <div className="mx-auto w-16 h-16 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center mb-4"><FileSpreadsheet className="w-8 h-8"/></div>
                     <h3 className="text-xl font-bold text-slate-700 mb-2">此清單內尚未建立任何表單</h3>
                     <p className="text-slate-500 mb-6 max-w-sm mx-auto">為了更好地分類盤點項目，請先新增一個表單（例如：財產盤點表、非消耗品盤點表）。</p>
-                    <button onClick={() => openTableModal()} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>新增第一份表單</button>
+                    {canEdit && <button onClick={() => openTableModal()} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>新增第一份表單</button>}
                 </div>
               ) : (
                 <>
@@ -2069,7 +2106,7 @@ export default function App() {
                                       <div className="flex gap-2 text-xs text-slate-600 font-mono">
                                           <span>總 {item.quantity}</span><span className="text-orange-500">借 {item.borrowedCount || 0}</span><span className={`font-bold ${available===0?'text-rose-500':'text-emerald-600'}`}>剩 {available}</span>
                                       </div>
-                                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                                      {canEdit && <div className="flex items-center gap-1.5 flex-shrink-0">
                                           <div className="flex gap-0.5 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
                                             <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
                                             <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
@@ -2077,17 +2114,23 @@ export default function App() {
                                           <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm ${available <= 0 ? 'bg-slate-300' : SysConfig.colorClass}`}>
                                             <Plus className="w-3 h-3"/> 借用
                                           </button>
-                                      </div>
+                                      </div>}
                                       </>
                                   ) : (
                                       <>
+                                      {canEdit ? (
                                       <button onClick={() => togglePropertyStatus(item)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
                                           {item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}
                                       </button>
-                                      <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                                      ) : (
+                                      <span className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                                          {item.status === '已盤點' ? <><CheckCircle className="w-3.5 h-3.5"/> 已盤點</> : <><XCircle className="w-3.5 h-3.5"/> 未盤點</>}
+                                      </span>
+                                      )}
+                                      {canEdit && <div className="flex gap-0.5 flex-shrink-0 bg-slate-50 rounded-lg border border-slate-100 p-0.5">
                                         <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 hover:bg-white rounded ${SysConfig.textClass.replace('text-','hover:text-')}`}><Edit2 className="w-3.5 h-3.5"/></button>
                                         <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:bg-rose-50 rounded hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button>
-                                      </div>
+                                      </div>}
                                       </>
                                   )}
                                 </div>
@@ -2192,7 +2235,7 @@ export default function App() {
                                         </div>
                                     </td>
                                     <td className="p-3 text-right align-top">
-                                        {!isSelectionMode && (
+                                        {!isSelectionMode && canEdit && (
                                             <div className="flex justify-end gap-1.5">
                                             <button onClick={()=>initiateAddToCart(item)} disabled={available <= 0} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : SysConfig.colorClass}`}>
                                                 <Plus className="w-3.5 h-3.5"/> 借用
@@ -2223,7 +2266,7 @@ export default function App() {
                                         <div><span className="text-slate-400">年限:</span> {item.lifespan || '-'}</div>
                                     </td>
                                     <td className="p-3 align-top text-center">
-                                        {!isSelectionMode ? (
+                                        {!isSelectionMode && canEdit ? (
                                             <button onClick={() => togglePropertyStatus(item)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer w-24 ${item.status === '已盤點' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'}`} title="點擊切換狀況">
                                                 {item.status === '已盤點' ? <><Check className="w-3.5 h-3.5"/> 已盤點</> : <><Minus className="w-3.5 h-3.5"/> 未盤點</>}
                                             </button>
@@ -2234,7 +2277,7 @@ export default function App() {
                                         )}
                                     </td>
                                     <td className="p-3 text-right align-top">
-                                        {!isSelectionMode && (
+                                        {!isSelectionMode && canEdit && (
                                             <div className="flex justify-end gap-1">
                                             <button onClick={()=>openItemModal(item)} className={`p-1.5 text-slate-400 bg-transparent hover:bg-slate-100 rounded-lg transition-colors ${SysConfig.textClass.replace('text-', 'hover:text-')}`}><Edit2 className="w-4 h-4"/></button>
                                             <button onClick={()=>deleteItem(item.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-transparent hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
@@ -2261,13 +2304,15 @@ export default function App() {
           {isLab && viewMode === 'layout' && currentSession && (
               <div className="flex flex-col w-full h-[calc(100dvh-140px)] min-h-[500px] bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
                   <div className="flex items-center gap-2 p-4 bg-slate-50 border-b border-slate-200 overflow-x-auto hide-scrollbar shrink-0">
+                      {canEdit && <>
                       <span className="text-sm font-bold text-slate-600 mr-2 whitespace-nowrap">新增設備模型：</span>
                       <button onClick={() => handleAddLayoutItem('computer')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Monitor className="w-4 h-4"/> 電腦</button>
                       <button onClick={() => handleAddLayoutItem('server')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Server className="w-4 h-4"/> 伺服器</button>
                       <button onClick={() => handleAddLayoutItem('printer')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Printer className="w-4 h-4"/> 印表機</button>
                       <button onClick={() => handleAddLayoutItem('desk')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><Box className="w-4 h-4"/> 辦公桌</button>
                       <button onClick={() => handleAddLayoutItem('aisle')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors shadow-sm text-sm font-medium whitespace-nowrap"><GripHorizontal className="w-4 h-4"/> 走道</button>
-                      
+                      </>}
+
                       {/* Zoom Controls */}
                       <div className="ml-auto flex items-center gap-2 bg-white px-2 py-1.5 rounded-lg border border-slate-200 shadow-sm shrink-0">
                           <button onClick={() => handleZoomClick(-1)} className="p-1 hover:bg-slate-100 rounded text-slate-500"><ZoomOut className="w-4 h-4"/></button>
@@ -2324,13 +2369,13 @@ export default function App() {
                                       {renderLayoutIcon(item.type, currentW, currentH)}
                                       <span className={`font-bold mt-2 text-slate-700 pointer-events-none truncate bg-slate-100 rounded ${isAisle ? 'text-xs px-2 max-w-full absolute opacity-50 bg-transparent' : 'text-sm px-1.5 max-w-[120px]'}`}>{item.label}</span>
                                       
-                                      <button 
-                                        onPointerDown={(e) => { e.stopPropagation(); handleDeleteLayoutItem(item.id); }} 
+                                      {canEdit && <button
+                                        onPointerDown={(e) => { e.stopPropagation(); handleDeleteLayoutItem(item.id); }}
                                         className="absolute -top-3 -right-3 bg-rose-500 text-white rounded-full p-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity hover:scale-110 shadow-sm z-50"
                                         title="刪除設備"
                                       >
                                         <X className="w-4 h-4"/>
-                                      </button>
+                                      </button>}
 
                                       {/* 🟢 走道專屬：右下角縮放拉柄 */}
                                       {isAisle && (
@@ -2354,7 +2399,7 @@ export default function App() {
           )}
 
           {/* 🟡 [PAGINATED] Borrow Request View (LAB ONLY) */}
-          {isLab && viewMode === 'borrow-request' && currentSession && (
+          {isLab && viewMode === 'borrow-request' && currentSession && canEdit && (
              <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 lg:h-full lg:overflow-hidden animate-in fade-in duration-300">
                 <div className="flex bg-slate-200 p-1 rounded-xl lg:hidden shrink-0">
                    <button onClick={() => setMobileBorrowTab('equipment')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${mobileBorrowTab === 'equipment' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>1. 選擇設備</button>
@@ -2476,7 +2521,7 @@ export default function App() {
                       </div>
                       {loan.purpose && <div className="text-xs text-slate-500 mt-1 px-1">用途: {loan.purpose}</div>}
                     </div>
-                    {loan.status === 'borrowed' ? <button onClick={()=>initiateReturn(loan.id)} className="w-full py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg text-sm font-bold shadow-sm flex items-center justify-center gap-2 transition-colors"><CheckCircle className="w-4 h-4"/> 確認歸還</button> : <div className="text-center text-xs text-emerald-600 py-2 bg-emerald-50 rounded-lg font-medium border border-emerald-100">歸還日期: {loan.returnDate}</div>}
+                    {loan.status === 'borrowed' ? (canEdit ? <button onClick={()=>initiateReturn(loan.id)} className="w-full py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg text-sm font-bold shadow-sm flex items-center justify-center gap-2 transition-colors"><CheckCircle className="w-4 h-4"/> 確認歸還</button> : <div className="text-center text-xs text-orange-600 py-2 bg-orange-50 rounded-lg font-medium border border-orange-100">借用中</div>) : <div className="text-center text-xs text-emerald-600 py-2 bg-emerald-50 rounded-lg font-medium border border-emerald-100">歸還日期: {loan.returnDate}</div>}
                   </div>
                 ))}
                 {paginatedLoans.length === 0 && <div className="text-center py-10 text-slate-400">無紀錄</div>}
@@ -2498,7 +2543,7 @@ export default function App() {
                           <td className="p-4 font-mono text-slate-500 text-xs whitespace-nowrap">{loan.borrowDate}</td>
                           <td className="p-4 font-mono text-slate-500 text-xs whitespace-nowrap">{loan.returnDate || '-'}</td>
                           <td className="p-4 text-right sticky right-0 bg-white">
-                            {loan.status === 'borrowed' && <button onClick={()=>initiateReturn(loan.id)} className="px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg text-xs font-bold shadow-sm transition-all active:scale-95 whitespace-nowrap flex items-center gap-1 ml-auto"><CheckCircle className="w-3 h-3"/> 歸還</button>}
+                            {loan.status === 'borrowed' && canEdit && <button onClick={()=>initiateReturn(loan.id)} className="px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg text-xs font-bold shadow-sm transition-all active:scale-95 whitespace-nowrap flex items-center gap-1 ml-auto"><CheckCircle className="w-3 h-3"/> 歸還</button>}
                           </td>
                         </tr>
                       ))}
@@ -2520,10 +2565,10 @@ export default function App() {
                     <div className="w-8 h-8 rounded-lg bg-teal-50 flex-shrink-0 flex items-center justify-center text-teal-600"><Hash className="w-4 h-4"/></div>
                     <span className="font-bold text-slate-700 text-sm break-words leading-tight">{c.name}</span>
                   </div>
-                  <div className="flex items-center gap-1 flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                  {canEdit && <div className="flex items-center gap-1 flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <button onClick={(e)=>{e.stopPropagation(); setModalType('category');setEditItem(c);setCatForm({name:c.name});setIsModalOpen(true)}} className="p-2 text-slate-400 hover:text-teal-600 rounded-lg hover:bg-teal-50 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
                     <button onClick={(e)=>{e.stopPropagation(); handleDeleteCategory(c.id)}} className="p-2 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
-                  </div>
+                  </div>}
                  </div>
                ))}
                {categories.length === 0 && <div className="col-span-full text-center py-10 text-slate-400">尚未設定分類</div>}
