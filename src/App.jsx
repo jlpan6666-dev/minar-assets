@@ -2221,8 +2221,9 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                  {/* Filter Bar */}
-                  <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl shadow-sm border border-slate-200 z-10 sticky top-0">
+                  {/* Filter Bar：黏在頂端時要把外層 padding 與 space-y 的縫隙一起蓋住，否則表格列會從縫隙穿過去 */}
+                  <div className="sticky -top-4 md:-top-6 z-30 -mx-4 md:-mx-6 px-4 md:px-6 pt-4 md:pt-6 pb-4 -mb-4 bg-slate-50">
+                  <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl shadow-sm border border-slate-200">
                     <div className="relative flex-1">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
                       <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
@@ -2283,6 +2284,7 @@ export default function App() {
                             </button>
                         </div>
                     </div>
+                  </div>
                   </div>
 
                   {/* Mobile Card View (Paginated with Selection) */}
@@ -2400,7 +2402,8 @@ export default function App() {
                   <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 sticky top-0 z-10 shadow-sm">
+                        {/* 篩選列已佔住黏頂位置，表頭再 sticky 會被壓在後面變成鬼影 */}
+                        <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500">
                             <tr>
                             {/* Master Checkbox Header */}
                             {isSelectionMode && (
@@ -2754,12 +2757,14 @@ export default function App() {
           {/* 🟡 [PAGINATED] Loan History View (LAB ONLY) */}
           {isLab && viewMode === 'loans' && currentSession && (
             <div className="space-y-4 animate-in fade-in duration-300">
-              <div className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center sticky top-0 z-30 shadow-sm">
+              <div className="sticky -top-4 md:-top-6 z-30 -mx-4 md:-mx-6 px-4 md:px-6 pt-4 md:pt-6 pb-4 -mb-4 bg-slate-50">
+              <div className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><History className="w-5 h-5 text-teal-600"/> 借用與歸還紀錄</h3>
                 <div className="flex items-center gap-2">
                   <span className="text-xs bg-teal-50 text-teal-700 border border-teal-100 px-2.5 py-1 rounded-full font-bold">共 {loans.length} 筆</span>
                   <button onClick={handleExportLoans} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95 text-sm font-bold"><FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline">匯出紀錄</span></button>
                 </div>
+              </div>
               </div>
               <div className="block md:hidden space-y-4">
                 {paginatedLoans.map(loan => (
@@ -2785,7 +2790,7 @@ export default function App() {
               <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm min-w-[1000px]">
-                    <thead className="bg-slate-50 border-b uppercase text-slate-500 text-xs sticky top-0 z-20 shadow-sm">
+                    <thead className="bg-slate-50 border-b uppercase text-slate-500 text-xs">
                       <tr><th className="p-4 font-semibold w-24">狀態</th><th className="p-4 font-semibold w-48">借用人資訊</th><th className="p-4 font-semibold w-48">設備 (數量)</th><th className="p-4 font-semibold w-64">借用用途</th><th className="p-4 font-semibold w-32">借用日期</th><th className="p-4 font-semibold w-32">歸還日期</th><th className="p-4 font-semibold text-right w-32 sticky right-0 bg-slate-50">動作</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
