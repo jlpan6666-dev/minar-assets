@@ -60,7 +60,8 @@ const db = getFirestore(app);
 const appId = 'lab-management-system-production';
 
 // --- 常數設定 ---
-const ITEMS_PER_PAGE = 6;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_PAGE_SIZE = 20;
 
 // --- 🟢 實驗室設備 Google 試算表（單向匯入來源）---
 // gviz 端點對公開試算表會回傳 CORS 標頭；若被瀏覽器擋下，改用「發佈到網路」的 /pub?output=csv 連結，
@@ -161,7 +162,7 @@ const FALLBACK_IMAGE_SRC = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3
 const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel, isDangerous }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
         <div className="p-6 text-center">
           <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isDangerous ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'}`}>
@@ -186,7 +187,7 @@ const ReturnModal = ({ isOpen, loan, onConfirm, onCancel }) => {
   if (!isOpen || !loan) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
         <div className="p-6">
           <div className="mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-green-100 text-green-600">
@@ -221,7 +222,7 @@ const SelectQuantityModal = ({ isOpen, item, onConfirm, onCancel }) => {
   if (!isOpen || !item) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
         <div className="p-6">
           <div className="mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-indigo-100 text-indigo-600"><ShoppingCart className="w-6 h-6" /></div>
@@ -256,11 +257,20 @@ const PaginationControl = ({ currentPage, totalPages, onPageChange }) => {
   );
 };
 
+// --- 元件：篩選欄位（圖示 + 文字標籤 + 實體控制項，取代原本透明控件蓋圖示的作法） ---
+const FilterField = ({ icon: Icon, label, active, children }) => (
+  <label className={`flex-shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${active ? 'border-slate-400 bg-slate-100' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
+    <Icon className={`w-4 h-4 ${active ? 'text-slate-700' : 'text-slate-400'}`} />
+    <span className="text-[10px] font-bold text-slate-400 uppercase whitespace-nowrap">{label}</span>
+    {children}
+  </label>
+);
+
 // --- 元件：訊息提示 Toast ---
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => { const timer = setTimeout(onClose, 2000); return () => clearTimeout(timer); }, [onClose]);
   return (
-    <div className="fixed top-4 right-4 z-[80] animate-in slide-in-from-right duration-300">
+    <div className="fixed top-4 right-4 z-[120] animate-in slide-in-from-right duration-300">
       <div className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border ${type === 'success' ? 'bg-white border-teal-100 text-teal-800' : 'bg-white border-red-100 text-red-800'}`}>
         {type === 'success' ? <CheckCircle className="w-5 h-5 text-teal-500" /> : <AlertCircle className="w-5 h-5 text-red-500" />}
         <span className="font-medium text-sm">{message}</span>
@@ -546,6 +556,7 @@ export default function App() {
   const [layoutScale, setLayoutScale] = useState(1); 
   const [resizeState, setResizeState] = useState(null); // 🟢 追蹤走道縮放狀態
   
+  const autoJumpedRef = useRef(false);
   const mapContainerRef = useRef(null);
   const pointerCache = useRef({});
   const pinchStartRef = useRef(null);
@@ -574,9 +585,14 @@ export default function App() {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState([]);
 
-  // Pagination State
+  // Pagination State（每頁筆數記在 localStorage，不進 Firestore）
   const [currentPage, setCurrentPage] = useState(1);
   const [currentLoanPage, setCurrentLoanPage] = useState(1);
+  const [pageSize, setPageSizeState] = useState(() => {
+    const saved = parseInt(localStorage.getItem('pageSize'), 10);
+    return PAGE_SIZE_OPTIONS.includes(saved) ? saved : DEFAULT_PAGE_SIZE;
+  });
+  const setPageSize = (n) => { localStorage.setItem('pageSize', String(n)); setPageSizeState(n); setCurrentPage(1); setCurrentLoanPage(1); };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
@@ -704,8 +720,18 @@ export default function App() {
     setSelectedItemIds([]);
     setIsActionMenuOpen(false);
     setLayoutScale(1);
-    setCanvasPan({ x: 0, y: 0 }); 
+    setCanvasPan({ x: 0, y: 0 });
+    autoJumpedRef.current = false;
   }, [appMode]);
+
+  // 🟢 進入系統後自動落在最新版次的資料列表，少點兩次；只在剛進系統時做一次，
+  // 之後使用者自己點「版次總覽」不會再被拉回去
+  useEffect(() => {
+    if (!appMode || autoJumpedRef.current || sessions.length === 0) return;
+    autoJumpedRef.current = true;
+    setCurrentSession(sessions[0]);
+    setViewMode('items');
+  }, [appMode, sessions]);
 
   // Reset Pagination & Selection when Filters/View Change
   useEffect(() => { 
@@ -1474,10 +1500,10 @@ export default function App() {
     return result;
   }, [itemsList, searchTerm, searchDate, selectedCategoryFilter, searchStatus, sortOption, isLab, currentTable]);
 
-  const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
-  const paginatedItems = useMemo(() => { const startIndex = (currentPage - 1) * ITEMS_PER_PAGE; return filteredItems.slice(startIndex, startIndex + ITEMS_PER_PAGE); }, [filteredItems, currentPage]);
-  const totalLoanPages = Math.ceil(loans.length / ITEMS_PER_PAGE);
-  const paginatedLoans = useMemo(() => { const startIndex = (currentLoanPage - 1) * ITEMS_PER_PAGE; return loans.slice(startIndex, startIndex + ITEMS_PER_PAGE); }, [loans, currentLoanPage]);
+  const totalPages = Math.ceil(filteredItems.length / pageSize);
+  const paginatedItems = useMemo(() => { const startIndex = (currentPage - 1) * pageSize; return filteredItems.slice(startIndex, startIndex + pageSize); }, [filteredItems, currentPage, pageSize]);
+  const totalLoanPages = Math.ceil(loans.length / pageSize);
+  const paginatedLoans = useMemo(() => { const startIndex = (currentLoanPage - 1) * pageSize; return loans.slice(startIndex, startIndex + pageSize); }, [loans, currentLoanPage, pageSize]);
 
   const toggleSelection = (id) => {
       setSelectedItemIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
@@ -1854,7 +1880,13 @@ export default function App() {
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-teal-600 font-medium animate-pulse">系統環境載入中...</div>;
-  if (!user || !appMode || !isAuthorizedMember) return <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} access={access} membersLoaded={membersLoaded} isAdmin={isAdmin} members={members} onAddMember={handleAddMember} onUpdateMember={handleUpdateMember} onRemoveMember={handleRemoveMember} />;
+  // 🟢 Toast 也要在入口頁渲染，否則邀請成員的成功/失敗提示不會出現
+  if (!user || !appMode || !isAuthorizedMember) return (
+    <>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
+      <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} access={access} membersLoaded={membersLoaded} isAdmin={isAdmin} members={members} onAddMember={handleAddMember} onUpdateMember={handleUpdateMember} onRemoveMember={handleRemoveMember} />
+    </>
+  );
 
   const SysConfig = SYSTEM_CONFIGS.find(s => s.id === appMode) || SYSTEM_CONFIGS[0];
 
@@ -2073,7 +2105,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
           
           {/* Dashboard View */}
           {viewMode === 'dashboard' && (
@@ -2196,69 +2228,53 @@ export default function App() {
                       <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
                     </div>
                     <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 items-center hide-scrollbar">
-                        
-                        {/* Date Filter */}
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                                <Calendar className={`w-4 h-4 ${searchDate ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <input type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title={searchDate ? `已篩選: ${searchDate}` : "依加入日期篩選"} />
-                            </div>
-                            {searchDate && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchDate} <button onClick={()=>setSearchDate('')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                        </div>
-                        
-                        {/* Lab Category Filter */}
+
+                        {/* 🟢 篩選控制項一律用看得見的下拉／輸入框，不再用透明控件蓋在圖示上 */}
+                        <FilterField icon={Calendar} label="加入日期" active={!!searchDate}>
+                          <input type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer" />
+                        </FilterField>
+
                         {isLab && (
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                                <Filter className={`w-4 h-4 ${selectedCategoryFilter !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類">
-                                  <option value="all">所有分類</option>
-                                  {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                            </div>
-                            {selectedCategoryFilter !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{categories.find(c => c.id === selectedCategoryFilter)?.name} <button onClick={()=>setSelectedCategoryFilter('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                        </div>
+                        <FilterField icon={Filter} label="分類" active={selectedCategoryFilter !== 'all'}>
+                          <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer max-w-[8rem]">
+                            <option value="all">所有分類</option>
+                            {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </FilterField>
                         )}
 
-                        {/* Property Status Filter */}
                         {!isLab && (
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                                <CheckSquare className={`w-4 h-4 ${searchStatus !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀況">
-                                  <option value="all">全部狀況</option>
-                                  <option value="未盤點">未盤點</option>
-                                  <option value="已盤點">已盤點</option>
-                                </select>
-                            </div>
-                            {searchStatus !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchStatus} <button onClick={()=>setSearchStatus('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                        </div>
+                        <FilterField icon={CheckSquare} label="盤點狀況" active={searchStatus !== 'all'}>
+                          <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                            <option value="all">全部狀況</option>
+                            <option value="未盤點">未盤點</option>
+                            <option value="已盤點">已盤點</option>
+                          </select>
+                        </FilterField>
                         )}
 
-                        {/* Sort Options */}
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                                <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'created_desc' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式">
-                                    <option value="created_desc" hidden>預設(最新)</option>
-                                    <option value="name">名稱排序</option>
-                                    {isLab && <option value="quantity_desc">數量 (多→少)</option>}
-                                    {isLab && <option value="quantity_asc">數量 (少→多)</option>}
-                                    {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
-                                    {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
-                                </select>
-                            </div>
-                            {sortOption !== 'created_desc' && (
-                               <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>
-                                 {sortOption === 'name' && '名稱排序'}
-                                 {sortOption === 'quantity_desc' && '數量 (多→少)'}
-                                 {sortOption === 'quantity_asc' && '數量 (少→多)'}
-                                 {sortOption === 'propId_asc' && '編號 (小→大)'}
-                                 {sortOption === 'propId_desc' && '編號 (大→小)'}
-                                 <button onClick={()=>setSortOption('created_desc')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
-                               </div>
-                            )}
-                        </div>
+                        <FilterField icon={ArrowUpDown} label="排序" active={sortOption !== 'created_desc'}>
+                          <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                            <option value="created_desc">預設（最新）</option>
+                            <option value="name">名稱排序</option>
+                            {isLab && <option value="quantity_desc">數量 (多→少)</option>}
+                            {isLab && <option value="quantity_asc">數量 (少→多)</option>}
+                            {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
+                            {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
+                          </select>
+                        </FilterField>
+
+                        <FilterField icon={ListChecks} label="每頁" active={pageSize !== DEFAULT_PAGE_SIZE}>
+                          <select value={pageSize} onChange={e=>setPageSize(parseInt(e.target.value, 10))} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                            {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} 筆</option>)}
+                          </select>
+                        </FilterField>
+
+                        {(searchTerm || searchDate || selectedCategoryFilter !== 'all' || searchStatus !== 'all' || sortOption !== 'created_desc') && (
+                          <button onClick={() => { setSearchTerm(''); setSearchDate(''); setSelectedCategoryFilter('all'); setSearchStatus('all'); setSortOption('created_desc'); }} className="flex-shrink-0 flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-rose-600 text-sm font-bold transition-colors">
+                            <X className="w-4 h-4"/> 清除篩選
+                          </button>
+                        )}
 
                         <div className="flex items-center gap-1 flex-shrink-0 border-l border-slate-200 pl-2 ml-1">
                             <button onClick={() => { if (isSelectionMode) { setIsSelectionMode(false); setSelectedItemIds([]); } else { setIsSelectionMode(true); } }} className={`flex items-center justify-center px-3 py-2 border rounded-lg transition-colors cursor-pointer gap-1.5 shadow-sm text-sm font-bold ${isSelectionMode ? `bg-${themeColor}-50 border-${themeColor}-300 ${SysConfig.textClass}` : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
@@ -2651,20 +2667,20 @@ export default function App() {
                           <input type="text" placeholder="輸入名稱搜尋..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 bg-white text-sm"/>
                         </div>
                         <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                                <div className="relative flex items-center justify-center px-3 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
-                                    <Filter className={`w-4 h-4 ${selectedCategoryFilter !== 'all' ? 'text-teal-600' : 'text-slate-500'}`} />
-                                    <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類"><option value="all">所有分類</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
-                                </div>
-                                {selectedCategoryFilter !== 'all' && <div className="flex items-center gap-1 bg-teal-50 text-teal-700 px-2 py-1 rounded-lg border border-teal-200 text-xs font-bold">{categories.find(c => c.id === selectedCategoryFilter)?.name} <button onClick={()=>setSelectedCategoryFilter('all')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                                <div className="relative flex items-center justify-center px-3 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
-                                    <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'created_desc' ? 'text-teal-600' : 'text-slate-500'}`} />
-                                    <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式"><option value="created_desc" hidden>預設</option><option value="name">名稱排序</option><option value="quantity_desc">數量 (多→少)</option><option value="quantity_asc">數量 (少→多)</option></select>
-                                </div>
-                                {sortOption !== 'created_desc' && <div className="flex items-center gap-1 bg-teal-50 text-teal-700 px-2 py-1 rounded-lg border border-teal-200 text-xs font-bold">{sortOption === 'name' ? '名稱排序' : sortOption === 'quantity_desc' ? '數量 (多→少)' : '數量 (少→多)'} <button onClick={()=>setSortOption('created_desc')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                            </div>
+                            <FilterField icon={Filter} label="分類" active={selectedCategoryFilter !== 'all'}>
+                              <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer max-w-[8rem]">
+                                <option value="all">所有分類</option>
+                                {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            </FilterField>
+                            <FilterField icon={ArrowUpDown} label="排序" active={sortOption !== 'created_desc'}>
+                              <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                                <option value="created_desc">預設（最新）</option>
+                                <option value="name">名稱排序</option>
+                                <option value="quantity_desc">數量 (多→少)</option>
+                                <option value="quantity_asc">數量 (少→多)</option>
+                              </select>
+                            </FilterField>
                         </div>
                       </div>
                    </div>
@@ -2815,6 +2831,39 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* 🟢 手機底部導覽列：不用再開側邊欄就能切換主要頁面 */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 shadow-[0_-2px_10px_rgba(0,0,0,0.05)] flex">
+        {[
+          { key: 'dashboard', label: '概覽', icon: Home },
+          { key: 'sessions', label: isLab ? '版次' : '清單', icon: FolderOpen },
+          { key: 'items', label: isLab ? '設備' : '財產', icon: LayoutGrid, needsSession: true },
+          ...(isLab && canEdit ? [{ key: 'borrow-request', label: '借用', icon: ShoppingCart, needsSession: true }] : []),
+          ...(isLab ? [{ key: 'loans', label: '紀錄', icon: History, needsSession: true }] : []),
+        ].map(tab => {
+          const Icon = tab.icon;
+          const activeTab = viewMode === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setIsSidebarOpen(false);
+                if (tab.needsSession && !currentSession) {
+                  if (sessions.length === 0) { showToast(isLab ? '請先建立版次' : '請先建立清單', 'error'); return; }
+                  setCurrentSession(sessions[0]);
+                } else if (!tab.needsSession) {
+                  setCurrentSession(null);
+                }
+                setViewMode(tab.key);
+              }}
+              className={`flex-1 py-2.5 flex flex-col items-center gap-0.5 transition-colors ${activeTab ? SysConfig.textClass : 'text-slate-400'}`}
+            >
+              <Icon className="w-5 h-5" />
+              <span className="text-[10px] font-bold">{tab.label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       {/* Modals (Forms) */}
       {isModalOpen && (

@@ -23,7 +23,9 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // 元件參數（{ icon: Icon }）只用在 JSX，本設定沒有 react/jsx-uses-vars 會誤報；
+      // catch (e) 已用 showToast 處理，不需再用到 e 本身
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^[A-Z_]', caughtErrors: 'none' }],
     },
   },
 ])
