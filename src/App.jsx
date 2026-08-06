@@ -651,6 +651,8 @@ export default function App() {
   const colTablesName = appMode === 'lab' ? null : `tables_${appMode}`; 
   const colItemsName = appMode === 'lab' ? 'equipment' : `items_${appMode}`;
   const isLab = appMode === 'lab';
+  // 🟢 建良老師設備管理不是年度盤點作業，清單直接自訂名稱（不寫 year/stage 欄位，既有資料不受影響）
+  const freeFormSession = isLab || appMode === 'property_jl';
   const themeColor = isLab ? 'teal' : appMode === 'property_jl' ? 'blue' : 'indigo';
 
   useEffect(() => {
@@ -1340,8 +1342,8 @@ export default function App() {
     e.preventDefault();
     if (!guardWrite()) return;
     try {
-      const sName = isLab ? sessionForm.name : `${sessionForm.year}年度-${sessionForm.stage}`;
-      const basePayload = { name: sName, date: sessionForm.date, createdBy: user.uid, ...(isLab ? {} : { year: sessionForm.year, stage: sessionForm.stage }) };
+      const sName = freeFormSession ? sessionForm.name : `${sessionForm.year}年度-${sessionForm.stage}`;
+      const basePayload = { name: sName, date: sessionForm.date, createdBy: user.uid, ...(freeFormSession ? {} : { year: sessionForm.year, stage: sessionForm.stage }) };
       let newSessionRef;
       
       if (editItem) {
@@ -1982,13 +1984,9 @@ export default function App() {
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 w-64 bg-slate-900 text-slate-100 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
         <div className={`p-6 ${SysConfig.colorClass} flex items-center justify-between`}>
-          <h1 className="text-lg font-bold flex items-center gap-2"><SysConfig.icon className="w-5 h-5"/> {SysConfig.name}</h1>
-          <div className="flex items-center gap-1">
-             {/* 🟢 返回入口、密碼修改與登出按鈕移至此處 */}
-             <button onClick={backToPortal} title="返回系統入口" className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Home className="w-4 h-4"/></button>
-             {isAdmin && <button onClick={() => setIsPwdModalOpen(true)} title="更改密碼" className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Key className="w-4 h-4"/></button>}
-             <button onClick={handleLogout} title="登出系統" className="p-1.5 text-white/80 hover:text-rose-200 hover:bg-white/20 rounded-md transition-colors"><LogOut className="w-4 h-4"/></button>
-          </div>
+          <h1 className="text-base font-bold flex items-center gap-2 min-w-0"><SysConfig.icon className="w-5 h-5 flex-shrink-0"/> <span className="truncate">{SysConfig.name}</span></h1>
+          {/* 🟢 只留「返回系統入口」；更改密碼與登出集中在右上角齒輪選單，避免標題被擠成兩行 */}
+          <button onClick={backToPortal} title="返回系統入口" className="flex-shrink-0 p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Home className="w-4 h-4"/></button>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <button onClick={() => { setViewMode('dashboard'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'dashboard' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Home className="w-5 h-5" /> 首頁概覽</button>
@@ -2013,13 +2011,14 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50">
-        <header className="bg-white shadow-sm border-b border-slate-100 p-4 flex items-center justify-between z-20">
+        <header className="bg-white shadow-sm border-b border-slate-100 relative z-30 flex-shrink-0">
+        <div className="p-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
              <button onClick={()=>setIsSidebarOpen(!isSidebarOpen)} className="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-lg"><Menu/></button>
              <div>
                 <div className="min-w-0 flex-1 pr-2">
                   <h2 className="text-lg md:text-2xl font-bold text-slate-800 truncate max-w-[200px] md:max-w-md">
-                    {viewMode === 'sessions' && (isLab ? '版次管理' : '年度盤點清單')}
+                    {viewMode === 'sessions' && (isLab ? '版次管理' : freeFormSession ? '清單管理' : '年度盤點清單')}
                     {viewMode === 'categories' && '分類設定'}
                     {viewMode === 'dashboard' && '首頁概覽'}
                     {currentSession && viewMode === 'items' && currentSession.name}
@@ -2103,6 +2102,69 @@ export default function App() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* 🟢 搜尋／篩選整合在標頭第二列：標頭本來就固定不捲動，不需要 sticky，也就沒有黏頂穿透問題 */}
+        {viewMode === 'items' && currentSession && (isLab || tables.length > 0) && (
+          <div className="px-4 pb-3 flex flex-col md:flex-row gap-2 md:items-center border-t border-slate-100 pt-3">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
+              <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
+            </div>
+            <div className="flex gap-2 overflow-x-auto items-center hide-scrollbar">
+              <FilterField icon={Calendar} label="加入日期" active={!!searchDate}>
+                <input type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer" />
+              </FilterField>
+
+              {isLab && (
+              <FilterField icon={Filter} label="分類" active={selectedCategoryFilter !== 'all'}>
+                <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer max-w-[8rem]">
+                  <option value="all">所有分類</option>
+                  {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </FilterField>
+              )}
+
+              {!isLab && (
+              <FilterField icon={CheckSquare} label="狀況" active={searchStatus !== 'all'}>
+                <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                  <option value="all">全部狀況</option>
+                  <option value="未盤點">未盤點</option>
+                  <option value="已盤點">已盤點</option>
+                </select>
+              </FilterField>
+              )}
+
+              <FilterField icon={ArrowUpDown} label="排序" active={sortOption !== 'created_desc'}>
+                <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                  <option value="created_desc">預設（最新）</option>
+                  <option value="name">名稱排序</option>
+                  {isLab && <option value="quantity_desc">數量 (多→少)</option>}
+                  {isLab && <option value="quantity_asc">數量 (少→多)</option>}
+                  {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
+                  {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
+                </select>
+              </FilterField>
+
+              <FilterField icon={ListChecks} label="每頁" active={pageSize !== DEFAULT_PAGE_SIZE}>
+                <select value={pageSize} onChange={e=>setPageSize(parseInt(e.target.value, 10))} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                  {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} 筆</option>)}
+                </select>
+              </FilterField>
+
+              {(searchTerm || searchDate || selectedCategoryFilter !== 'all' || searchStatus !== 'all' || sortOption !== 'created_desc') && (
+                <button onClick={() => { setSearchTerm(''); setSearchDate(''); setSelectedCategoryFilter('all'); setSearchStatus('all'); setSortOption('created_desc'); }} className="flex-shrink-0 flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-rose-600 text-sm font-bold transition-colors">
+                  <X className="w-4 h-4"/> 清除
+                </button>
+              )}
+
+              <button onClick={() => { if (isSelectionMode) { setIsSelectionMode(false); setSelectedItemIds([]); } else { setIsSelectionMode(true); } }} className={`flex-shrink-0 flex items-center justify-center px-3 py-2 border rounded-lg transition-colors gap-1.5 text-sm font-bold ml-1 ${isSelectionMode ? `bg-${themeColor}-50 border-${themeColor}-300 ${SysConfig.textClass}` : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                <ListChecks className={`w-4 h-4 ${isSelectionMode ? SysConfig.textClass : 'text-slate-500'}`} />
+                <span className="hidden sm:inline">{isSelectionMode ? '取消選取' : '多重選取'}</span>
+              </button>
+            </div>
+          </div>
+        )}
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
@@ -2147,9 +2209,9 @@ export default function App() {
                 ) : (
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center mt-6">
                      <div className="mx-auto w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mb-4"><CheckSquare className="w-8 h-8"/></div>
-                     <h3 className="text-xl font-bold text-slate-700 mb-2">開始盤點作業</h3>
-                     <p className="text-slate-500 mb-6 max-w-md mx-auto">請前往「清單總覽」選擇您要進行盤點的年度與階段。您可以隨時匯入學校提供的 Excel 清單，或是將盤點結果匯出為 Excel 檔案以利歸檔。</p>
-                     <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); }} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>前往盤點清單總覽</button>
+                     <h3 className="text-xl font-bold text-slate-700 mb-2">{freeFormSession ? '開始管理設備' : '開始盤點作業'}</h3>
+                     <p className="text-slate-500 mb-6 max-w-md mx-auto">{freeFormSession ? '請前往「清單總覽」選擇或建立清單。清單名稱可自由命名，不限定年度或盤點階段；資料可隨時以 Excel 匯入匯出。' : '請前往「清單總覽」選擇您要進行盤點的年度與階段。您可以隨時匯入學校提供的 Excel 清單，或是將盤點結果匯出為 Excel 檔案以利歸檔。'}</p>
+                     <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); }} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>前往清單總覽</button>
                   </div>
                 )}
              </div>
@@ -2221,71 +2283,7 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                  {/* Filter Bar：黏在頂端時要把外層 padding 與 space-y 的縫隙一起蓋住，否則表格列會從縫隙穿過去 */}
-                  <div className="sticky -top-4 md:-top-6 z-30 -mx-4 md:-mx-6 px-4 md:px-6 pt-4 md:pt-6 pb-4 -mb-4 bg-slate-50">
-                  <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl shadow-sm border border-slate-200">
-                    <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
-                      <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
-                    </div>
-                    <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 items-center hide-scrollbar">
-
-                        {/* 🟢 篩選控制項一律用看得見的下拉／輸入框，不再用透明控件蓋在圖示上 */}
-                        <FilterField icon={Calendar} label="加入日期" active={!!searchDate}>
-                          <input type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer" />
-                        </FilterField>
-
-                        {isLab && (
-                        <FilterField icon={Filter} label="分類" active={selectedCategoryFilter !== 'all'}>
-                          <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer max-w-[8rem]">
-                            <option value="all">所有分類</option>
-                            {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-                          </select>
-                        </FilterField>
-                        )}
-
-                        {!isLab && (
-                        <FilterField icon={CheckSquare} label="盤點狀況" active={searchStatus !== 'all'}>
-                          <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
-                            <option value="all">全部狀況</option>
-                            <option value="未盤點">未盤點</option>
-                            <option value="已盤點">已盤點</option>
-                          </select>
-                        </FilterField>
-                        )}
-
-                        <FilterField icon={ArrowUpDown} label="排序" active={sortOption !== 'created_desc'}>
-                          <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
-                            <option value="created_desc">預設（最新）</option>
-                            <option value="name">名稱排序</option>
-                            {isLab && <option value="quantity_desc">數量 (多→少)</option>}
-                            {isLab && <option value="quantity_asc">數量 (少→多)</option>}
-                            {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
-                            {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
-                          </select>
-                        </FilterField>
-
-                        <FilterField icon={ListChecks} label="每頁" active={pageSize !== DEFAULT_PAGE_SIZE}>
-                          <select value={pageSize} onChange={e=>setPageSize(parseInt(e.target.value, 10))} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
-                            {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} 筆</option>)}
-                          </select>
-                        </FilterField>
-
-                        {(searchTerm || searchDate || selectedCategoryFilter !== 'all' || searchStatus !== 'all' || sortOption !== 'created_desc') && (
-                          <button onClick={() => { setSearchTerm(''); setSearchDate(''); setSelectedCategoryFilter('all'); setSearchStatus('all'); setSortOption('created_desc'); }} className="flex-shrink-0 flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-rose-600 text-sm font-bold transition-colors">
-                            <X className="w-4 h-4"/> 清除篩選
-                          </button>
-                        )}
-
-                        <div className="flex items-center gap-1 flex-shrink-0 border-l border-slate-200 pl-2 ml-1">
-                            <button onClick={() => { if (isSelectionMode) { setIsSelectionMode(false); setSelectedItemIds([]); } else { setIsSelectionMode(true); } }} className={`flex items-center justify-center px-3 py-2 border rounded-lg transition-colors cursor-pointer gap-1.5 shadow-sm text-sm font-bold ${isSelectionMode ? `bg-${themeColor}-50 border-${themeColor}-300 ${SysConfig.textClass}` : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
-                              <ListChecks className={`w-4 h-4 ${isSelectionMode ? SysConfig.textClass : 'text-slate-500'}`} />
-                              <span className="hidden sm:inline">{isSelectionMode ? '取消選取' : '多重選取'}</span>
-                            </button>
-                        </div>
-                    </div>
-                  </div>
-                  </div>
+                  {/* 🟢 搜尋與篩選已整合至頁面標頭（見 header），此處不再重複渲染 */}
 
                   {/* Mobile Card View (Paginated with Selection) */}
                   <div className="block md:hidden">
@@ -2757,14 +2755,12 @@ export default function App() {
           {/* 🟡 [PAGINATED] Loan History View (LAB ONLY) */}
           {isLab && viewMode === 'loans' && currentSession && (
             <div className="space-y-4 animate-in fade-in duration-300">
-              <div className="sticky -top-4 md:-top-6 z-30 -mx-4 md:-mx-6 px-4 md:px-6 pt-4 md:pt-6 pb-4 -mb-4 bg-slate-50">
               <div className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><History className="w-5 h-5 text-teal-600"/> 借用與歸還紀錄</h3>
                 <div className="flex items-center gap-2">
                   <span className="text-xs bg-teal-50 text-teal-700 border border-teal-100 px-2.5 py-1 rounded-full font-bold">共 {loans.length} 筆</span>
                   <button onClick={handleExportLoans} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95 text-sm font-bold"><FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline">匯出紀錄</span></button>
                 </div>
-              </div>
               </div>
               <div className="block md:hidden space-y-4">
                 {paginatedLoans.map(loan => (
@@ -2876,7 +2872,7 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className={`text-xl font-bold ${SysConfig.textClass} flex items-center gap-2`}>
-                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯清單') : (isLab ? '新增版次' : '建立年度清單'))}
+                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯清單') : (isLab ? '新增版次' : freeFormSession ? '建立清單' : '建立年度清單'))}
                 {modalType === 'table' && (editItem ? '編輯表單名稱' : '新增表單')}
                 {modalType === 'item' && (editItem ? (isLab ? '編輯設備' : '編輯財產') : (isLab ? '新增設備' : '新增財產'))}
                 {modalType === 'category' && (editItem ? '編輯分類' : '新增分類')}
@@ -2888,8 +2884,8 @@ export default function App() {
             {/* Session Form */}
             {modalType === 'session' && (
               <form onSubmit={handleSaveSession} className="space-y-4">
-                {isLab ? (
-                    <div><label className="text-sm font-bold text-slate-700 mb-1 block">版次名稱</label><input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none" value={sessionForm.name} onChange={e=>setSessionForm({...sessionForm, name:e.target.value})} placeholder="例如: 2023 上學期" required/></div>
+                {freeFormSession ? (
+                    <div><label className="text-sm font-bold text-slate-700 mb-1 block">{isLab ? '版次名稱' : '清單名稱'}</label><input className={`w-full border border-slate-200 rounded-lg p-2.5 focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={sessionForm.name} onChange={e=>setSessionForm({...sessionForm, name:e.target.value})} placeholder={isLab ? "例如: 2023 上學期" : "例如: 研究室設備、專題室器材"} required autoFocus/></div>
                 ) : (
                     <div className="grid grid-cols-2 gap-4">
                         <div><label className="text-sm font-bold text-slate-700 mb-1 block">盤點年度</label><input type="number" className={`w-full border border-slate-200 rounded-lg p-2.5 focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={sessionForm.year} onChange={e=>setSessionForm({...sessionForm, year:e.target.value})} placeholder="例如: 113" required/></div>
