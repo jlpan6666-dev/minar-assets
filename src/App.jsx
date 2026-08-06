@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 
 import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
+import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 
 // ==========================================
 // 🟢 您的 Firebase 設定
@@ -59,7 +60,13 @@ const db = getFirestore(app);
 const appId = 'lab-management-system-production';
 
 // --- 常數設定 ---
-const ITEMS_PER_PAGE = 6; 
+const ITEMS_PER_PAGE = 6;
+
+// --- 🟢 實驗室設備 Google 試算表（單向匯入來源）---
+// gviz 端點對公開試算表會回傳 CORS 標頭；若被瀏覽器擋下，改用「發佈到網路」的 /pub?output=csv 連結，
+// 或直接於匯入視窗貼上 CSV 內容。使用者自訂的網址存 localStorage，不寫入 Firestore。
+const LAB_SHEET_ID = '1qOZWJ88tAxN4pNsJXD8v077iiBrBVTztrd9s9OZLMh0';
+const DEFAULT_LAB_SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${LAB_SHEET_ID}/gviz/tq?tqx=out:csv`;
 
 const SYSTEM_CONFIGS = [
   { id: 'lab', name: '實驗室設備管理', icon: Beaker, pwd: 'minar7917', colorClass: 'bg-teal-600', hoverClass: 'hover:bg-teal-700', textClass: 'text-teal-600' },
@@ -602,6 +609,14 @@ export default function App() {
   const [isPwdModalOpen, setIsPwdModalOpen] = useState(false);
   const [pwdForm, setPwdForm] = useState({ old: '', new: '', confirm: '' });
 
+  // 🟢 Google 試算表匯入 State（設定值只存 localStorage，不動 Firestore）
+  const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState(localStorage.getItem('labSheetCsvUrl') || DEFAULT_LAB_SHEET_CSV_URL);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetError, setSheetError] = useState('');
+  const [sheetPasteText, setSheetPasteText] = useState('');
+  const [sheetPreview, setSheetPreview] = useState(null);
+
   // 🟢 實驗室成員授權管理（權限邏輯見 src/permissions.js）
   const userEmail = (user?.email || '').toLowerCase();
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
@@ -855,9 +870,14 @@ export default function App() {
     return false;
   };
   
-  const handleLogout = () => {
+  // 🟢 返回系統入口：只退出目前系統，保持 Google 登入狀態
+  const backToPortal = () => {
     localStorage.removeItem('appMode');
     setAppMode(null);
+  };
+
+  const handleLogout = () => {
+    backToPortal();
     // Google 帳號登出後，onAuthStateChanged 會自動改回匿名登入
     if (user && !user.isAnonymous) signOut(auth).catch(console.error);
   };
@@ -996,14 +1016,30 @@ export default function App() {
     reader.readAsArrayBuffer(file);
   };
 
+  // 🟢 共用匯出：sheets = [{ name, headers, rows }]
+  const downloadSheet = (filename, sheets) => {
+    if (!window.XLSX) { showToast("Excel 模組載入中，請稍後再試", "error"); return false; }
+    const XLSX = window.XLSX;
+    const workbook = XLSX.utils.book_new();
+    const used = new Set();
+    sheets.forEach((s, idx) => {
+      // 工作表名稱限制：不可含 []:*?/\ 且長度上限 31，且不可重複
+      let name = (s.name || `工作表${idx + 1}`).replace(/[[\]:*?/\\]/g, ' ').slice(0, 31) || `工作表${idx + 1}`;
+      while (used.has(name)) name = `${name.slice(0, 28)}_${idx + 1}`;
+      used.add(name);
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([s.headers, ...s.rows]), name);
+    });
+    XLSX.writeFile(workbook, filename);
+    showToast("Excel 下載已開始");
+    return true;
+  };
+
   const handleExportExcel = async (sessionToExport = currentSession, exportSelectedOnly = false) => {
     if (!sessionToExport) return;
-
     if (!window.XLSX) {
       showToast("Excel 模組載入中，請稍後再試", "error");
       return;
     }
-    const XLSX = window.XLSX;
 
     let exportItems = [];
     if (currentSession && sessionToExport.id === currentSession.id) {
@@ -1042,19 +1078,120 @@ export default function App() {
         });
     }
 
-    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "清單");
-
     const tablePrefix = (!isLab && currentTable && currentSession && sessionToExport.id === currentSession.id) ? `_${currentTable.name}` : '';
     const selectionPrefix = exportSelectedOnly ? '_選取項目' : '';
-    XLSX.writeFile(workbook, `${sessionToExport.name}${tablePrefix}${selectionPrefix}_清單.xlsx`);
-    
+    downloadSheet(`${sessionToExport.name}${tablePrefix}${selectionPrefix}_清單.xlsx`, [{ name: '清單', headers, rows }]);
+
     if (exportSelectedOnly) {
         setIsSelectionMode(false);
         setSelectedItemIds([]);
     }
-    showToast("Excel 下載已開始");
+  };
+
+  // 🟢 匯出借還紀錄（實驗室設備）
+  const handleExportLoans = () => {
+    if (!currentSession) return;
+    if (!loans.length) { showToast("無借還紀錄可匯出", "error"); return; }
+    const headers = ["狀態", "借用人", "電話", "設備", "數量", "用途", "借用日期", "預計歸還", "歸還日期"];
+    const rows = loans.map(l => [
+      l.status === 'borrowed' ? '借用中' : '已歸還',
+      l.borrower || '', l.phone || '', l.equipmentName || '', l.quantity || 0, l.purpose || '',
+      l.borrowDate || '', getExpectedReturnDate(l.borrowDate, l.borrowDays) || '', l.returnDate || '',
+    ]);
+    downloadSheet(`${currentSession.name}_借還紀錄.xlsx`, [{ name: '借還紀錄', headers, rows }]);
+  };
+
+  // 🟢 匯出成 Google 試算表同款欄位（實驗室設備），可直接貼回線上試算表
+  const handleExportSheetFormat = () => {
+    if (!currentSession) return;
+    if (!itemsList.length) { showToast("無資料可匯出", "error"); return; }
+    const rows = itemsList.map(item => {
+      // 借用人/日期/電話取該設備目前仍在借用中的第一筆紀錄；材料編號、信箱資料庫無對應欄位，留空
+      const loan = loans.find(l => l.status === 'borrowed' && l.equipmentName === item.name);
+      return [
+        item.name || '', '', item.quantity ?? 0,
+        loan?.borrower || '', loan?.borrowDate || '',
+        loan ? getExpectedReturnDate(loan.borrowDate, loan.borrowDays) : '',
+        loan?.phone || '', '', item.note || '',
+      ];
+    });
+    downloadSheet(`${currentSession.name}_試算表格式.xlsx`, [{ name: '材料設備', headers: SHEET_HEADERS, rows }]);
+  };
+
+  // 🟢 財產系統：整份清單合併匯出，每個表單一個工作表
+  const handleExportAllTables = async () => {
+    if (!currentSession || isLab) return;
+    try {
+      const snapshot = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', currentSession.id)));
+      const all = snapshot.docs.map(d => d.data());
+      if (!all.length) { showToast("無資料可匯出", "error"); return; }
+      const headers = ["所屬表單", "財產編號", "財產名稱", "廠牌型別", "現值", "取得日期", "使用年限", "使用人", "存置地點", "備註", "盤點狀況"];
+      const toRow = (item) => [item.tableName||'', item.propId||'', item.name||'', item.brandModel||'', item.value||'', item.acquireDate||'', item.lifespan||'', item.user||'', item.location||'', item.note||'', item.status||'未盤點'];
+      const sheets = tables.map(t => ({ name: t.name, headers, rows: all.filter(i => i.tableId === t.id).map(toRow) }));
+      const orphans = all.filter(i => !tables.some(t => t.id === i.tableId));
+      if (orphans.length) sheets.push({ name: '未歸屬表單', headers, rows: orphans.map(toRow) });
+      if (!sheets.length) { showToast("無資料可匯出", "error"); return; }
+      downloadSheet(`${currentSession.name}_全部表單.xlsx`, sheets);
+    } catch (err) { console.error(err); showToast("匯出失敗", "error"); }
+  };
+
+  // 🟢 Google 試算表單向匯入（試算表 → 系統，僅實驗室設備）
+  const openSheetModal = () => {
+    if (!guardWrite()) return;
+    if (!currentSession) { showToast("請先選擇版次", "error"); return; }
+    setSheetError(''); setSheetPreview(null); setSheetPasteText('');
+    setIsSheetModalOpen(true);
+  };
+
+  const buildSheetPreview = (csvText) => {
+    const rows = parseSheetRows(parseCSV(csvText));
+    if (!rows.length) { setSheetError('試算表沒有可匯入的資料（第一欄「材料設備」需有名稱）'); return; }
+    setSheetError('');
+    setSheetPreview(diffEquipment(rows, itemsList));
+  };
+
+  const handleSheetFetch = async () => {
+    setSheetBusy(true); setSheetError(''); setSheetPreview(null);
+    try {
+      const res = await fetch(sheetUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      localStorage.setItem('labSheetCsvUrl', sheetUrl);
+      buildSheetPreview(await res.text());
+    } catch (err) {
+      console.error(err);
+      setSheetError('無法讀取試算表（可能是瀏覽器跨網域限制）。請改用「檔案 → 共用 → 發佈到網路 → CSV」的連結，或直接在下方貼上 CSV 內容。');
+    } finally { setSheetBusy(false); }
+  };
+
+  const handleSheetApply = async () => {
+    if (!guardWrite()) return;
+    if (!currentSession || !sheetPreview) return;
+    const { toAdd, toUpdate } = sheetPreview;
+    if (!toAdd.length && !toUpdate.length) { showToast("沒有需要變更的資料"); setIsSheetModalOpen(false); return; }
+    setSheetBusy(true);
+    try {
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const today = now.toISOString().slice(0, 10);
+      const batch = writeBatch(db);
+      toAdd.forEach(row => {
+        // 欄位組合與 handleSaveItem 完全一致，不新增任何欄位
+        batch.set(doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName)), {
+          sessionId: currentSession.id, name: row.name, quantity: row.quantity,
+          categoryId: '', categoryName: '未分類', note: row.note, imageUrl: '',
+          addDate: today, borrowedCount: 0, lastUpdatedStr: stamp,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        });
+      });
+      // 只更新有變動的欄位，不碰 borrowedCount（避免弄壞借出中的庫存）
+      toUpdate.forEach(row => {
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', colItemsName, row.id), { ...row.changes, lastUpdatedStr: stamp, updatedAt: serverTimestamp() });
+      });
+      await batch.commit();
+      showToast(`匯入完成：新增 ${toAdd.length} 筆、更新 ${toUpdate.length} 筆`);
+      setIsSheetModalOpen(false); setSheetPreview(null);
+    } catch (err) { console.error(err); showToast("匯入失敗", "error"); }
+    finally { setSheetBusy(false); }
   };
 
   const deleteSession = (id) => {
@@ -1388,16 +1525,51 @@ export default function App() {
     setSelectQuantityDialog({ isOpen: false, item: null });
   };
   const updateCartQty = (id, delta) => { setCartItems(cartItems.map(c => { if(c.id === id) { const n = c.borrowQty + delta; if(n > 0 && n <= c.maxQty) return {...c, borrowQty: n}; } return c; })); };
+  const handleCartQtyInput = (id, value) => {
+    const n = parseInt(value, 10);
+    if (isNaN(n)) return;
+    setCartItems(cartItems.map(c => c.id === id ? { ...c, borrowQty: Math.max(1, Math.min(c.maxQty, n)) } : c));
+  };
+  const removeFromCart = (id) => setCartItems(cartItems.filter(c => c.id !== id));
   const handleBatchBorrow = async (e) => {
     e.preventDefault(); if (!guardWrite()) return; if (!currentSession) return; if (!cartItems.length) { showToast("請先加入設備", "error"); return; }
     try { 
-      const promises = cartItems.map(item => {
-        addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'loans'), { sessionId: currentSession.id, equipmentId: item.id, equipmentName: item.name, borrower: borrowForm.borrower, phone: borrowForm.phone, purpose: borrowForm.purpose, quantity: item.borrowQty, borrowDays: borrowForm.borrowDays, borrowDate: borrowForm.date, returnDate: null, status: 'borrowed', createdAt: serverTimestamp(), updatedAt: serverTimestamp() }); 
-        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'equipment', item.id), { borrowedCount: increment(item.borrowQty) }); 
-      });
+      // 🟢 兩個寫入都要回傳，Promise.all 才會真的等它們完成（失敗才會落到 catch）
+      const promises = cartItems.flatMap(item => [
+        addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'loans'), { sessionId: currentSession.id, equipmentId: item.id, equipmentName: item.name, borrower: borrowForm.borrower, phone: borrowForm.phone, purpose: borrowForm.purpose, quantity: item.borrowQty, borrowDays: borrowForm.borrowDays, borrowDate: borrowForm.date, returnDate: null, status: 'borrowed', createdAt: serverTimestamp(), updatedAt: serverTimestamp() }),
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'equipment', item.id), { borrowedCount: increment(item.borrowQty) }),
+      ]);
       await Promise.all(promises); setCartItems([]); setBorrowForm({ borrower: '', phone: '', date: new Date().toISOString().slice(0,10), purpose: '', borrowDays: 7 }); showToast("借出成功"); setViewMode('loans'); setMobileBorrowTab('equipment');
     } catch (err) { showToast("借用失敗", "error"); } 
   };
+  const initiateReturn = (loanId) => {
+    if (!guardWrite()) return;
+    const loan = loans.find(l => l.id === loanId);
+    if (loan) setReturnDialog({ isOpen: true, loan });
+  };
+
+  // 🟢 儀表板卡片／借用動態列：跳到對應版次與檢視
+  const handleStatClick = (kind) => {
+    const target = sessions.find(s => s.id === dashboardStats.latestSessionId) || sessions[0];
+    if (!target) { showToast('尚無資料可檢視', 'error'); return; }
+    setCurrentSession(target);
+    if (kind === 'borrowed') {
+      if (isLab) { setViewMode('loans'); return; }
+      setSearchStatus('已盤點');
+    } else if (kind === 'lowstock') {
+      if (isLab) setSortOption('quantity_asc');
+      else setSearchStatus('未盤點');
+    }
+    setViewMode('items');
+  };
+
+  const handleActivityClick = (group) => {
+    const target = sessions.find(s => s.id === group.sessionId) || sessions[0];
+    if (!target) return;
+    setCurrentSession(target);
+    setViewMode('loans');
+  };
+
   const handleReturnConfirm = async (loanId, returnQty, originalQty) => {
     if (!guardWrite()) return;
     try {
@@ -1719,6 +1891,59 @@ export default function App() {
         </div>
       )}
 
+      {/* 🟢 Google 試算表匯入 Modal（僅實驗室設備、可寫入權限） */}
+      {isSheetModalOpen && isLab && canEdit && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsSheetModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-5 border-b border-slate-100 pb-4">
+              <h3 className="text-xl font-bold text-teal-600 flex items-center gap-2"><FileSpreadsheet className="w-5 h-5"/> 從 Google 試算表匯入</h3>
+              <button onClick={() => setIsSheetModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
+            </div>
+
+            <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+              依「材料設備」名稱比對目前版次（{currentSession?.name}）的設備：名稱不存在則新增，存在則只更新數量與備註，不會動到已借出數量。<br/>
+              若讀取失敗，請於試算表點「檔案 → 共用 → 發佈到網路 → CSV」取得連結貼在下方，或直接貼上 CSV 內容。
+            </p>
+
+            <label className="text-sm font-bold text-slate-700 block mb-1">試算表 CSV 連結</label>
+            <div className="flex gap-2 mb-3">
+              <input value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} className="flex-1 border border-slate-200 rounded-lg p-2.5 text-xs outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
+              <button onClick={handleSheetFetch} disabled={sheetBusy} className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-4 rounded-lg font-bold text-sm whitespace-nowrap">{sheetBusy ? '讀取中...' : '讀取'}</button>
+            </div>
+
+            {sheetError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-lg mb-3 flex items-start gap-2"><AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5"/> {sheetError}</div>}
+
+            <label className="text-sm font-bold text-slate-700 block mb-1">或直接貼上 CSV 內容</label>
+            <textarea value={sheetPasteText} onChange={e => setSheetPasteText(e.target.value)} placeholder="材料設備,材料編號,數量,..." className="w-full border border-slate-200 rounded-lg p-2.5 h-24 text-xs font-mono resize-none outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
+            <button onClick={() => buildSheetPreview(sheetPasteText)} disabled={!sheetPasteText.trim()} className="w-full mt-2 border border-slate-200 text-slate-700 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 disabled:opacity-40">解析貼上的內容</button>
+
+            {sheetPreview && (
+              <div className="mt-5 border-t border-slate-100 pt-4">
+                <div className="flex gap-2 mb-3 text-xs font-bold">
+                  <span className="px-2.5 py-1.5 rounded-lg bg-teal-50 text-teal-700 border border-teal-100">新增 {sheetPreview.toAdd.length}</span>
+                  <span className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-100">更新 {sheetPreview.toUpdate.length}</span>
+                  <span className="px-2.5 py-1.5 rounded-lg bg-slate-50 text-slate-500 border border-slate-100">不變 {sheetPreview.unchanged}</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto space-y-1 text-xs bg-slate-50 rounded-lg p-2 border border-slate-100">
+                  {[...sheetPreview.toAdd.map(r => ({ t: '新增', name: r.name, detail: `數量 ${r.quantity}` })),
+                    ...sheetPreview.toUpdate.map(r => ({ t: '更新', name: r.name, detail: Object.entries(r.changes).map(([k, v]) => `${k === 'quantity' ? '數量' : '備註'} → ${v || '（清空）'}`).join('、') }))]
+                    .slice(0, 20).map((r, i) => (
+                      <div key={i} className="flex items-center gap-2 bg-white rounded px-2 py-1.5 border border-slate-100">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.t === '新增' ? 'bg-teal-100 text-teal-700' : 'bg-amber-100 text-amber-700'}`}>{r.t}</span>
+                        <span className="font-bold text-slate-700 truncate">{r.name}</span>
+                        <span className="text-slate-400 truncate ml-auto">{r.detail}</span>
+                      </div>
+                    ))}
+                  {sheetPreview.toAdd.length + sheetPreview.toUpdate.length === 0 && <div className="text-center text-slate-400 py-3">沒有需要變更的資料</div>}
+                  {sheetPreview.toAdd.length + sheetPreview.toUpdate.length > 20 && <div className="text-center text-slate-400 py-1">…等共 {sheetPreview.toAdd.length + sheetPreview.toUpdate.length} 筆</div>}
+                </div>
+                <button onClick={handleSheetApply} disabled={sheetBusy || (sheetPreview.toAdd.length + sheetPreview.toUpdate.length === 0)} className="w-full mt-4 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white py-3 rounded-xl font-bold shadow-md">{sheetBusy ? '寫入中...' : '確認匯入'}</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 🟢 實驗室成員管理 Modal（僅教師帳號） */}
       <MemberModal isOpen={isMemberModalOpen && isAdmin} onClose={() => setIsMemberModalOpen(false)} members={members} onAdd={handleAddMember} onUpdate={handleUpdateMember} onRemove={handleRemoveMember} />
 
@@ -1727,8 +1952,9 @@ export default function App() {
         <div className={`p-6 ${SysConfig.colorClass} flex items-center justify-between`}>
           <h1 className="text-lg font-bold flex items-center gap-2"><SysConfig.icon className="w-5 h-5"/> {SysConfig.name}</h1>
           <div className="flex items-center gap-1">
-             {/* 🟢 密碼修改與登出按鈕移至此處 */}
-             <button onClick={() => setIsPwdModalOpen(true)} title="更改密碼" className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Key className="w-4 h-4"/></button>
+             {/* 🟢 返回入口、密碼修改與登出按鈕移至此處 */}
+             <button onClick={backToPortal} title="返回系統入口" className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Home className="w-4 h-4"/></button>
+             {isAdmin && <button onClick={() => setIsPwdModalOpen(true)} title="更改密碼" className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Key className="w-4 h-4"/></button>}
              <button onClick={handleLogout} title="登出系統" className="p-1.5 text-white/80 hover:text-rose-200 hover:bg-white/20 rounded-md transition-colors"><LogOut className="w-4 h-4"/></button>
           </div>
         </div>
@@ -1819,6 +2045,15 @@ export default function App() {
                     {viewMode === 'items' && !isSelectionMode && (
                       <>
                         <button onClick={() => { handleExportExcel(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出清單 Excel</button>
+                        {isLab && (
+                          <button onClick={() => { handleExportSheetFormat(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出（試算表格式）</button>
+                        )}
+                        {!isLab && (
+                          <button onClick={() => { handleExportAllTables(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出整份清單（各表單分頁）</button>
+                        )}
+                        {canEdit && isLab && (
+                          <button onClick={() => { setIsActionMenuOpen(false); openSheetModal(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 從 Google 試算表匯入</button>
+                        )}
                         {canEdit && !isLab && currentTable && (
                           <button onClick={() => { setIsActionMenuOpen(false); fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel 資料</button>
                         )}
@@ -1827,6 +2062,7 @@ export default function App() {
                     )}
 
                     {/* 全域選項 */}
+                    <button onClick={() => { backToPortal(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Home className="w-4 h-4 text-slate-500"/> 返回系統入口</button>
                     {isAdmin && <button onClick={() => { setIsMemberModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
                     {isAdmin && <button onClick={() => { setIsPwdModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Key className="w-4 h-4 text-indigo-600"/> 更改系統密碼</button>}
                     <button onClick={() => { handleLogout(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 flex items-center gap-3 text-rose-600 font-bold transition-colors"><LogOut className="w-4 h-4"/> 登出系統</button>
@@ -2504,7 +2740,10 @@ export default function App() {
             <div className="space-y-4 animate-in fade-in duration-300">
               <div className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center sticky top-0 z-30 shadow-sm">
                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><History className="w-5 h-5 text-teal-600"/> 借用與歸還紀錄</h3>
-                <span className="text-xs bg-teal-50 text-teal-700 border border-teal-100 px-2.5 py-1 rounded-full font-bold">共 {loans.length} 筆</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-teal-50 text-teal-700 border border-teal-100 px-2.5 py-1 rounded-full font-bold">共 {loans.length} 筆</span>
+                  <button onClick={handleExportLoans} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95 text-sm font-bold"><FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline">匯出紀錄</span></button>
+                </div>
               </div>
               <div className="block md:hidden space-y-4">
                 {paginatedLoans.map(loan => (
