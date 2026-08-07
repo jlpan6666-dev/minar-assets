@@ -31,7 +31,7 @@ import {
   AlertTriangle, LayoutGrid, Menu, X, CheckCircle, 
   AlertCircle, ChevronRight, ChevronLeft, Calendar, FolderOpen,
   History, UserCheck, Phone, Clock, FileDown, ArrowUpRight, ArrowDownLeft, 
-  MousePointerClick, Sparkles, Timer, ShoppingCart, Minus, ArrowUpDown, 
+  MousePointerClick, Timer, ShoppingCart, Minus, ArrowUpDown,
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
   FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut,
   Key, GripHorizontal
