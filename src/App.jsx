@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
@@ -596,6 +596,20 @@ export default function App() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
+
+  // 🟢 資料載入狀態：區分「還沒載完」與「真的沒資料」，並可在不重新整理頁面的情況下重新訂閱
+  const [reloadKey, setReloadKey] = useState(0);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [itemsLoaded, setItemsLoaded] = useState(false);
+
+  // 監聽失敗不再靜靜吞掉：Firestore 的 onSnapshot 一旦錯誤就永久停止推送，
+  // 沒有錯誤處理時畫面看起來只是「沒有資料」，而且只能重新整理頁面才會恢復。
+  // 必須宣告在下方各監聽 effect 之前——相依陣列在 render 當下就會求值。
+  // useCallback：參考位址要穩定，否則每次 render 都會重新訂閱。
+  const onListenerError = useCallback((label) => (err) => {
+    console.error(`[listener:${label}]`, err);
+    setToast({ message: `${label}載入失敗，請點右上角齒輪 →「重新載入資料」`, type: 'error' });
+  }, []);
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', action: null });
   const [returnDialog, setReturnDialog] = useState({ isOpen: false, loan: null }); 
   const [selectQuantityDialog, setSelectQuantityDialog] = useState({ isOpen: false, item: null }); 
@@ -606,7 +620,7 @@ export default function App() {
   const [editItem, setEditItem] = useState(null);
   
   // Forms State
-  const [sessionForm, setSessionForm] = useState({ name: '', date: '', year: '', stage: '初盤', copyFromPrevious: false });
+  const [sessionForm, setSessionForm] = useState({ name: '', date: '', year: '', stage: '初盤', copyFromId: '' });
   const [tableForm, setTableForm] = useState({ name: '' }); 
   const [equipForm, setEquipForm] = useState({ name: '', quantity: 1, categoryId: '', note: '', imageUrl: '', addDate: '' });
   const [propForm, setPropForm] = useState({ propId: '', name: '', brandModel: '', value: '', acquireDate: '', lifespan: '', user: '', location: '', note: '', status: '未盤點', imageUrl: '' });
@@ -747,11 +761,14 @@ export default function App() {
   useEffect(() => {
     if (!user || !appMode) return;
     let unsubCat = () => {};
-    if (isLab) unsubCat = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), snap => setCategories(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+    if (isLab) unsubCat = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), snap => setCategories(snap.docs.map(d => ({id: d.id, ...d.data()}))), onListenerError('分類'));
     const qSession = query(collection(db, 'artifacts', appId, 'public', 'data', colSessionsName), orderBy('date', 'desc'));
-    const unsubSess = onSnapshot(qSession, snap => setSessions(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+    const unsubSess = onSnapshot(qSession, snap => {
+      setSessions(snap.docs.map(d => ({id: d.id, ...d.data()})));
+      setSessionsLoaded(true);
+    }, onListenerError('清單'));
     return () => { unsubCat(); unsubSess(); };
-  }, [user, appMode, isLab, colSessionsName]);
+  }, [user, appMode, isLab, colSessionsName, reloadKey, onListenerError]);
 
   useEffect(() => {
     if (!user || !currentSession || isLab || !colTablesName) {
@@ -769,9 +786,9 @@ export default function App() {
             if (prev && !fetchedTables.find(t => t.id === prev.id)) return fetchedTables.length > 0 ? fetchedTables[0] : null;
             return prev;
         });
-    });
+    }, onListenerError('表單'));
     return () => unsubTables();
-  }, [user, currentSession, isLab, colTablesName]);
+  }, [user, currentSession, isLab, colTablesName, reloadKey, onListenerError]);
 
   // Listener for Layout Items (Lab Only)
   useEffect(() => {
@@ -782,9 +799,9 @@ export default function App() {
     const qLayouts = query(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'), where('sessionId', '==', currentSession.id));
     const unsubLayouts = onSnapshot(qLayouts, snap => {
         setLayoutItems(snap.docs.map(d => ({id: d.id, ...d.data()})));
-    });
+    }, onListenerError('配置圖'));
     return () => unsubLayouts();
-  }, [user, currentSession, isLab]);
+  }, [user, currentSession, isLab, reloadKey, onListenerError]);
 
   // 🟢 滾輪放大縮小效果 (Wheel Zoom logic)
   useEffect(() => {
@@ -844,7 +861,7 @@ export default function App() {
         }
       });
       setDashboardStats(prev => ({ ...prev, latestSessionId: targetSessionId, latestSessionName: latestSession.name, totalItems: total, totalBorrowedOrInventoried: countA, lowStockOrUninventoried: countB }));
-    });
+    }, onListenerError('概覽統計'));
 
     let unsubLoans = () => {};
     if (isLab) {
@@ -865,18 +882,22 @@ export default function App() {
             else grouped.push({ ...event, items: [{ name: event.equipmentName, quantity: event.quantity, id: event.id }] });
           });
           setDashboardStats(prev => ({ ...prev, groupedActivity: grouped.slice(0, 10) }));
-        });
+        }, onListenerError('借用動態'));
     }
 
     return () => { unsubItems(); unsubLoans(); };
-  }, [user, appMode, viewMode, sessions, isLab, colItemsName]); 
+  }, [user, appMode, viewMode, sessions, isLab, colItemsName, reloadKey, onListenerError]);
 
   // Session Data Items Listeners
   useEffect(() => {
     if (!user || !currentSession || !appMode) return;
+    setItemsLoaded(false);
     const qItems = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', currentSession.id));
-    const unsubItems = onSnapshot(qItems, snap => setItemsList(snap.docs.map(d => ({id: d.id, ...d.data()}))));
-    
+    const unsubItems = onSnapshot(qItems, snap => {
+      setItemsList(snap.docs.map(d => ({id: d.id, ...d.data()})));
+      setItemsLoaded(true);
+    }, onListenerError(isLab ? '設備' : '財產'));
+
     let unsubLoans = () => {};
     if (isLab) {
         const qLoan = query(collection(db, 'artifacts', appId, 'public', 'data', 'loans'), where('sessionId', '==', currentSession.id));
@@ -884,12 +905,21 @@ export default function App() {
           const list = snap.docs.map(d => ({id: d.id, ...d.data()}));
           list.sort((a, b) => (a.borrowDate > b.borrowDate ? -1 : 1));
           setLoans(list);
-        });
+        }, onListenerError('借還紀錄'));
     }
     return () => { unsubItems(); unsubLoans(); };
-  }, [user, appMode, currentSession, isLab, colItemsName]);
+  }, [user, appMode, currentSession, isLab, colItemsName, reloadKey, onListenerError]);
 
   const showToast = (msg, type='success') => setToast({message: msg, type});
+
+  // 🟢 監聽失敗不再靜靜吞掉：Firestore 的 onSnapshot 一旦錯誤就永久停止推送，
+  // 沒有錯誤處理時畫面看起來就只是「沒有資料」，而且只能重新整理頁面才會恢復
+  const reloadData = () => {
+    setSessionsLoaded(false);
+    setItemsLoaded(false);
+    setReloadKey(k => k + 1);
+    showToast('重新載入資料中...');
+  };
 
   // 🟢 寫入防護：低權限（唯讀）一律擋下並提示
   const guardWrite = () => {
@@ -1352,8 +1382,9 @@ export default function App() {
       } else {
         newSessionRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', colSessionsName), { ...basePayload, createdAt: serverTimestamp() });
         
-        if (sessionForm.copyFromPrevious && sessions.length > 0) {
-            const latestSession = sessions[0];
+        // 🟢 複製來源可指定任一既有清單，不限上一期
+        const latestSession = sessions.find(s => s.id === sessionForm.copyFromId);
+        if (latestSession) {
             const batch = writeBatch(db);
             let countItems = 0;
 
@@ -1520,7 +1551,7 @@ export default function App() {
 
   const openSessionModal = (item=null) => { 
       setModalType('session'); setEditItem(item); 
-      setSessionForm({ name: item ? item.name : '', date: item ? item.date : new Date().toISOString().slice(0,10), year: item ? item.year||'' : new Date().getFullYear()-1911, stage: item ? item.stage||'初盤' : '初盤', copyFromPrevious: false }); 
+      setSessionForm({ name: item ? item.name : '', date: item ? item.date : new Date().toISOString().slice(0,10), year: item ? item.year||'' : new Date().getFullYear()-1911, stage: item ? item.stage||'初盤' : '初盤', copyFromId: '' });
       setIsModalOpen(true); 
   };
   
@@ -2093,6 +2124,7 @@ export default function App() {
                     )}
 
                     {/* 全域選項 */}
+                    <button onClick={() => { reloadData(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Activity className="w-4 h-4 text-slate-500"/> 重新載入資料</button>
                     <button onClick={() => { backToPortal(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Home className="w-4 h-4 text-slate-500"/> 返回系統入口</button>
                     {isAdmin && <button onClick={() => { setIsMemberModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
                     {isAdmin && <button onClick={() => { setIsPwdModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Key className="w-4 h-4 text-indigo-600"/> 更改系統密碼</button>}
@@ -2242,7 +2274,7 @@ export default function App() {
                   </div>
                 </div>
               ))}
-              {sessions.length === 0 && <div className="col-span-full text-center py-20 text-slate-400">尚未建立任何清單，請點擊右上角「新增」。</div>}
+              {sessions.length === 0 && <div className="col-span-full text-center py-20 text-slate-400">{sessionsLoaded ? '尚未建立任何清單，請點擊右上角「新增」。' : <span className="animate-pulse">載入中...</span>}</div>}
             </div>
           )}
 
@@ -2391,7 +2423,7 @@ export default function App() {
                           </div>
                         );
                       })}
-                      {filteredItems.length===0 && <div className="text-center py-10 text-slate-400">沒有找到相符資料</div>}
+                      {filteredItems.length===0 && <div className="text-center py-10 text-slate-400">{itemsLoaded ? '沒有找到相符資料' : <span className="animate-pulse">載入中...</span>}</div>}
                     </div>
                     <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                   </div>
@@ -2542,7 +2574,7 @@ export default function App() {
                                 </tr>
                             );
                             })}
-                            {filteredItems.length === 0 && <tr><td colSpan={isSelectionMode ? 7 : 6} className="p-12 text-center text-slate-400">沒有找到相符資料</td></tr>}
+                            {filteredItems.length === 0 && <tr><td colSpan={isSelectionMode ? 7 : 6} className="p-12 text-center text-slate-400">{itemsLoaded ? '沒有找到相符資料' : <span className="animate-pulse">載入中...</span>}</td></tr>}
                         </tbody>
                         </table>
                     </div>
@@ -2896,9 +2928,13 @@ export default function App() {
                 <div><label className="text-sm font-bold text-slate-700 mb-1 block">建立日期</label><input type="date" className={`w-full border border-slate-200 rounded-lg p-2.5 focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={sessionForm.date} onChange={e=>setSessionForm({...sessionForm, date:e.target.value})} required/></div>
                 
                 {!editItem && sessions.length > 0 && (
-                  <div className={`flex items-center gap-3 p-4 bg-${themeColor}-50 rounded-xl border border-${themeColor}-100`}>
-                    <input type="checkbox" id="copyFromPrevious" className={`w-5 h-5 text-${themeColor}-600 rounded focus:ring-${themeColor}-500 cursor-pointer`} checked={sessionForm.copyFromPrevious} onChange={e=>setSessionForm({...sessionForm, copyFromPrevious:e.target.checked})}/>
-                    <label htmlFor="copyFromPrevious" className={`text-sm text-${themeColor}-800 cursor-pointer select-none leading-relaxed`}><span className="font-bold block">複製上一期的{isLab?'設備':'財產'}資料？</span><span className={`text-xs text-${themeColor}-600/80`}>{isLab ? '將複製名稱、分類、總數等，借出數會歸零' : '將複製所有表單與財產資料，盤點狀況會重置為「未盤點」'}</span></label>
+                  <div className={`p-4 bg-${themeColor}-50 rounded-xl border border-${themeColor}-100 space-y-2`}>
+                    <label className={`text-sm font-bold text-${themeColor}-800 block`}>從既有清單複製{isLab?'設備':'財產'}資料</label>
+                    <select value={sessionForm.copyFromId} onChange={e=>setSessionForm({...sessionForm, copyFromId:e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 bg-white outline-none focus:border-slate-400 text-sm">
+                      <option value="">不複製（建立空白清單）</option>
+                      {sessions.map(s => <option key={s.id} value={s.id}>{s.name}（{s.date}）</option>)}
+                    </select>
+                    <p className={`text-xs text-${themeColor}-600/80 leading-relaxed`}>{isLab ? '將複製名稱、分類、總數與配置圖，借出數會歸零' : '將複製所有表單與財產資料，盤點狀況會重置為「未盤點」'}</p>
                   </div>
                 )}
                 <button type="submit" className={`w-full text-white py-3 rounded-xl font-bold shadow-md mt-6 transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>儲存建立</button>
