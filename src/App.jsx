@@ -30,7 +30,7 @@ import {
   Beaker, Settings, LogOut, Plus, Search, Trash2, Edit2, 
   AlertTriangle, LayoutGrid, Menu, X, CheckCircle, 
   AlertCircle, ChevronRight, ChevronLeft, Calendar, FolderOpen,
-  History, UserCheck, Phone, Clock, FileDown, ArrowUpRight, ArrowDownLeft, 
+  History, UserCheck, Phone, Clock, FileDown,
   MousePointerClick, Timer, ShoppingCart, Minus, ArrowUpDown,
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
   FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut,
@@ -39,6 +39,7 @@ import {
 
 import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
+import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
 // 🟢 您的 Firebase 設定
@@ -89,12 +90,12 @@ const getMinguoDateString = () => {
   return `${minguoYear}/${month}/${day}`;
 };
 
-// --- 🔵 工具函式：計算預計歸還日期 ---
-const getExpectedReturnDate = (dateStr, days) => { 
-  if(!dateStr || !days) return ''; 
-  const d = new Date(dateStr); 
-  d.setDate(d.getDate() + parseInt(days)); 
-  return d.toISOString().slice(0,10); 
+// --- 🔵 工具函式：計算預計歸還日期（日期運算集中在 src/loanDue.js，避免時區差一天）---
+const getExpectedReturnDate = (dateStr, days) => addDays(dateStr, days);
+// 用本地日期，不用 toISOString（UTC+8 的凌晨會被算成前一天）
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 // --- 🔵 工具函式：圖片壓縮轉 Base64 ---
@@ -290,6 +291,42 @@ const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick }) =>
     <div className={`p-3 rounded-xl ${colorClass} shadow-sm group-hover:scale-110 transition-transform`}><Icon className="w-6 h-6 text-white" /></div>
   </div>
 );
+
+// --- 元件：到期清單卡片（逾期 / 即將到期共用） ---
+const DueListCard = ({ title, icon: Icon, tone, rows, emptyText, renderBadge, onRowClick }) => {
+  const toneClass = tone === 'rose'
+    ? { head: 'text-rose-600', badge: 'bg-rose-100 text-rose-700 border-rose-200', row: 'hover:bg-rose-50/50' }
+    : { head: 'text-amber-600', badge: 'bg-amber-100 text-amber-700 border-amber-200', row: 'hover:bg-amber-50/50' };
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col h-[360px]">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className={`font-bold text-lg text-slate-800 flex items-center gap-2`}><Icon className={`w-5 h-5 ${toneClass.head}`} /> {title}</h3>
+        <span className="text-sm font-bold text-slate-400">{rows.length} 筆</span>
+      </div>
+      <div className="flex-1 overflow-y-auto -mx-1 px-1">
+        {rows.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-slate-400 text-sm">{emptyText}</div>
+        ) : (
+          <div className="space-y-2">
+            {rows.map(loan => (
+              <button key={loan.id} onClick={() => onRowClick(loan)} className={`w-full text-left border border-slate-100 rounded-xl px-3 py-2.5 transition-colors ${toneClass.row}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-slate-800 text-sm truncate">{loan.equipmentName} <span className="font-mono text-slate-400">x{loan.quantity}</span></span>
+                  <span className={`flex-shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full border ${toneClass.badge}`}>{renderBadge(loan)}</span>
+                </div>
+                <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                  <span className="flex items-center gap-1 truncate"><UserCheck className="w-3 h-3" />{loan.borrower || '—'}</span>
+                  {loan.phone && <span className="flex items-center gap-1 truncate"><Phone className="w-3 h-3" />{loan.phone}</span>}
+                  <span className="flex items-center gap-1 ml-auto flex-shrink-0"><Clock className="w-3 h-3" />應還 {loan.dueDate}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // --- 元件：實驗室成員管理 Modal（僅老師/高權限帳號） ---
 const MemberModal = ({ isOpen, onClose, members, onAdd, onUpdate, onRemove }) => {
@@ -556,7 +593,6 @@ export default function App() {
   const [layoutScale, setLayoutScale] = useState(1); 
   const [resizeState, setResizeState] = useState(null); // 🟢 追蹤走道縮放狀態
   
-  const autoJumpedRef = useRef(false);
   const mapContainerRef = useRef(null);
   const pointerCache = useRef({});
   const pinchStartRef = useRef(null);
@@ -573,7 +609,7 @@ export default function App() {
   };
   
   // Dashboard Stats
-  const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, groupedActivity: [] });
+  const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, overdue: [], dueSoon: [] });
 
   // UI State
   const [searchTerm, setSearchTerm] = useState('');
@@ -728,7 +764,8 @@ export default function App() {
 
   // Reset Filters, Selection & Navigation on Mode Change
   useEffect(() => {
-    setViewMode('dashboard');
+    // 🟢 進入系統直接落在清單／版次總覽（首頁概覽仍可從側邊欄或底部導覽進入）
+    setViewMode('sessions');
     setCurrentSession(null);
     setCurrentTable(null);
     setSearchTerm(''); setSearchDate(''); setSearchStatus('all'); setSelectedCategoryFilter('all');
@@ -737,17 +774,7 @@ export default function App() {
     setIsActionMenuOpen(false);
     setLayoutScale(1);
     setCanvasPan({ x: 0, y: 0 });
-    autoJumpedRef.current = false;
   }, [appMode]);
-
-  // 🟢 進入系統後自動落在最新版次的資料列表，少點兩次；只在剛進系統時做一次，
-  // 之後使用者自己點「版次總覽」不會再被拉回去
-  useEffect(() => {
-    if (!appMode || autoJumpedRef.current || sessions.length === 0) return;
-    autoJumpedRef.current = true;
-    setCurrentSession(sessions[0]);
-    setViewMode('items');
-  }, [appMode, sessions]);
 
   // Reset Pagination & Selection when Filters/View Change
   useEffect(() => { 
@@ -840,7 +867,7 @@ export default function App() {
   useEffect(() => {
     if (!user || viewMode !== 'dashboard' || !appMode) return;
     if (sessions.length === 0) {
-        setDashboardStats({ latestSessionId: null, latestSessionName: '尚無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, groupedActivity: [] });
+        setDashboardStats({ latestSessionId: null, latestSessionName: '尚無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, overdue: [], dueSoon: [] });
         return;
     }
     const latestSession = sessions[0];
@@ -867,22 +894,10 @@ export default function App() {
     if (isLab) {
         const qLoans = query(collection(db, 'artifacts', appId, 'public', 'data', 'loans'), where('sessionId', '==', targetSessionId));
         unsubLoans = onSnapshot(qLoans, (snap) => {
-          const rawEvents = [];
-          snap.forEach(doc => {
-            const data = doc.data();
-            const loanId = doc.id;
-            rawEvents.push({ id: loanId + '_borrow', originalId: loanId, sessionId: data.sessionId, type: 'borrow', date: data.borrowDate, borrower: data.borrower, equipmentName: data.equipmentName, quantity: data.quantity, timestamp: data.createdAt ? data.createdAt.seconds : 0 });
-            if (data.status === 'returned' && data.returnDate) rawEvents.push({ id: loanId + '_return', originalId: loanId, sessionId: data.sessionId, type: 'return', date: data.returnDate, borrower: data.borrower, equipmentName: data.equipmentName, quantity: data.quantity, timestamp: data.updatedAt ? data.updatedAt.seconds : Date.now()/1000 });
-          });
-          rawEvents.sort((a, b) => b.timestamp - a.timestamp);
-          const grouped = [];
-          rawEvents.forEach(event => {
-            const group = grouped.find(g => g.type === event.type && g.borrower === event.borrower && Math.abs(g.timestamp - event.timestamp) < 60 && g.date === event.date);
-            if (group) group.items.push({ name: event.equipmentName, quantity: event.quantity, id: event.id });
-            else grouped.push({ ...event, items: [{ name: event.equipmentName, quantity: event.quantity, id: event.id }] });
-          });
-          setDashboardStats(prev => ({ ...prev, groupedActivity: grouped.slice(0, 10) }));
-        }, onListenerError('借用動態'));
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const { overdue, dueSoon } = splitLoansByDue(list, todayStr());
+          setDashboardStats(prev => ({ ...prev, overdue, dueSoon }));
+        }, onListenerError('借用到期'));
     }
 
     return () => { unsubItems(); unsubLoans(); };
@@ -1622,8 +1637,9 @@ export default function App() {
     setViewMode('items');
   };
 
-  const handleActivityClick = (group) => {
-    const target = sessions.find(s => s.id === group.sessionId) || sessions[0];
+  // 點首頁的到期項目 → 跳到該版次的借還紀錄
+  const goToLoans = (loan) => {
+    const target = sessions.find(s => s.id === loan.sessionId) || sessions[0];
     if (!target) return;
     setCurrentSession(target);
     setViewMode('loans');
@@ -2212,31 +2228,26 @@ export default function App() {
                 </div>
                 
                 {isLab ? (
-                <div className="grid grid-cols-1 gap-6">
-                    {/* 🟢 移除系統提示，並將表格寬度設為滿版 */}
-                    <div className="w-full bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col h-[400px]">
-                    <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><History className="w-5 h-5 text-teal-600"/> 最新借用動態</h3></div>
-                    <div className="flex-1 overflow-auto">
-                        <table className="w-full text-left min-w-[500px]">
-                        <thead className="text-slate-400 text-xs uppercase bg-slate-50 sticky top-0 z-10"><tr><th className="p-3">日期</th><th className="p-3">動作</th><th className="p-3">借用人</th><th className="p-3">物品清單</th></tr></thead>
-                        <tbody className="divide-y divide-slate-50 text-sm">
-                            {dashboardStats.groupedActivity.map((group, idx) => (
-                            <tr key={idx} onClick={() => handleActivityClick(group)} className="hover:bg-slate-50/80 cursor-pointer transition-colors group">
-                                <td className="p-3 text-slate-500 align-top">{group.date}</td>
-                                <td className="p-3 align-top">{group.type === 'borrow' ? <span className="flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-0.5 rounded text-xs w-fit font-bold border border-orange-100"><ArrowUpRight className="w-3 h-3"/> 借出</span> : <span className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-0.5 rounded text-xs w-fit font-bold border border-green-100"><ArrowDownLeft className="w-3 h-3"/> 歸還</span>}</td>
-                                <td className="p-3 font-medium text-slate-700 align-top">{group.borrower}</td>
-                                <td className="p-3 align-top">
-                                    <div className="flex flex-wrap gap-2">
-                                        {group.items.map((item, i) => ( <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-2 py-1 rounded text-xs border border-slate-200">{item.name} <span className="font-bold text-slate-500">x{item.quantity}</span></span> ))}
-                                    </div>
-                                </td>
-                            </tr>
-                            ))}
-                            {dashboardStats.groupedActivity.length===0 && <tr><td colSpan="4" className="p-6 text-center text-slate-400">近期無活動</td></tr>}
-                        </tbody>
-                        </table>
-                    </div>
-                    </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* 🟢 逾期未歸還：由借用日期 + 預計天數推算應歸還日，逾期最久的排最前面 */}
+                    <DueListCard
+                      title="逾期未歸還"
+                      icon={AlertTriangle}
+                      tone="rose"
+                      rows={dashboardStats.overdue}
+                      emptyText="沒有逾期項目 👍"
+                      renderBadge={(l) => `逾期 ${Math.abs(l.daysLeft)} 天`}
+                      onRowClick={goToLoans}
+                    />
+                    <DueListCard
+                      title="即將到期（3 天內）"
+                      icon={Timer}
+                      tone="amber"
+                      rows={dashboardStats.dueSoon}
+                      emptyText="近期沒有到期項目"
+                      renderBadge={(l) => (l.daysLeft === 0 ? '今天到期' : `剩 ${l.daysLeft} 天`)}
+                      onRowClick={goToLoans}
+                    />
                 </div>
                 ) : (
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center mt-6">
