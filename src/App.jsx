@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
@@ -30,14 +30,16 @@ import {
   Beaker, Settings, LogOut, Plus, Search, Trash2, Edit2, 
   AlertTriangle, LayoutGrid, Menu, X, CheckCircle, 
   AlertCircle, ChevronRight, ChevronLeft, Calendar, FolderOpen,
-  History, UserCheck, Phone, Clock, FileDown, ArrowUpRight, ArrowDownLeft, 
-  MousePointerClick, Sparkles, Timer, ShoppingCart, Minus, ArrowUpDown, 
+  History, UserCheck, Phone, Clock, FileDown,
+  MousePointerClick, Timer, ShoppingCart, Minus, ArrowUpDown,
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
   FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut,
   Key, GripHorizontal
 } from 'lucide-react';
 
 import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
+import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
+import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
 // 🟢 您的 Firebase 設定
@@ -59,7 +61,14 @@ const db = getFirestore(app);
 const appId = 'lab-management-system-production';
 
 // --- 常數設定 ---
-const ITEMS_PER_PAGE = 6; 
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_PAGE_SIZE = 20;
+
+// --- 🟢 實驗室設備 Google 試算表（單向匯入來源）---
+// gviz 端點對公開試算表會回傳 CORS 標頭；若被瀏覽器擋下，改用「發佈到網路」的 /pub?output=csv 連結，
+// 或直接於匯入視窗貼上 CSV 內容。使用者自訂的網址存 localStorage，不寫入 Firestore。
+const LAB_SHEET_ID = '1qOZWJ88tAxN4pNsJXD8v077iiBrBVTztrd9s9OZLMh0';
+const DEFAULT_LAB_SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${LAB_SHEET_ID}/gviz/tq?tqx=out:csv`;
 
 const SYSTEM_CONFIGS = [
   { id: 'lab', name: '實驗室設備管理', icon: Beaker, pwd: 'minar7917', colorClass: 'bg-teal-600', hoverClass: 'hover:bg-teal-700', textClass: 'text-teal-600' },
@@ -81,12 +90,12 @@ const getMinguoDateString = () => {
   return `${minguoYear}/${month}/${day}`;
 };
 
-// --- 🔵 工具函式：計算預計歸還日期 ---
-const getExpectedReturnDate = (dateStr, days) => { 
-  if(!dateStr || !days) return ''; 
-  const d = new Date(dateStr); 
-  d.setDate(d.getDate() + parseInt(days)); 
-  return d.toISOString().slice(0,10); 
+// --- 🔵 工具函式：計算預計歸還日期（日期運算集中在 src/loanDue.js，避免時區差一天）---
+const getExpectedReturnDate = (dateStr, days) => addDays(dateStr, days);
+// 用本地日期，不用 toISOString（UTC+8 的凌晨會被算成前一天）
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 // --- 🔵 工具函式：圖片壓縮轉 Base64 ---
@@ -154,7 +163,7 @@ const FALLBACK_IMAGE_SRC = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3
 const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel, isDangerous }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
         <div className="p-6 text-center">
           <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isDangerous ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'}`}>
@@ -179,7 +188,7 @@ const ReturnModal = ({ isOpen, loan, onConfirm, onCancel }) => {
   if (!isOpen || !loan) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
         <div className="p-6">
           <div className="mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-green-100 text-green-600">
@@ -214,7 +223,7 @@ const SelectQuantityModal = ({ isOpen, item, onConfirm, onCancel }) => {
   if (!isOpen || !item) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
         <div className="p-6">
           <div className="mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-indigo-100 text-indigo-600"><ShoppingCart className="w-6 h-6" /></div>
@@ -249,11 +258,20 @@ const PaginationControl = ({ currentPage, totalPages, onPageChange }) => {
   );
 };
 
+// --- 元件：篩選欄位（圖示 + 文字標籤 + 實體控制項，取代原本透明控件蓋圖示的作法） ---
+const FilterField = ({ icon: Icon, label, active, children }) => (
+  <label className={`flex-shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${active ? 'border-slate-400 bg-slate-100' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
+    <Icon className={`w-4 h-4 ${active ? 'text-slate-700' : 'text-slate-400'}`} />
+    <span className="text-[10px] font-bold text-slate-400 uppercase whitespace-nowrap">{label}</span>
+    {children}
+  </label>
+);
+
 // --- 元件：訊息提示 Toast ---
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => { const timer = setTimeout(onClose, 2000); return () => clearTimeout(timer); }, [onClose]);
   return (
-    <div className="fixed top-4 right-4 z-[80] animate-in slide-in-from-right duration-300">
+    <div className="fixed top-4 right-4 z-[120] animate-in slide-in-from-right duration-300">
       <div className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border ${type === 'success' ? 'bg-white border-teal-100 text-teal-800' : 'bg-white border-red-100 text-red-800'}`}>
         {type === 'success' ? <CheckCircle className="w-5 h-5 text-teal-500" /> : <AlertCircle className="w-5 h-5 text-red-500" />}
         <span className="font-medium text-sm">{message}</span>
@@ -273,6 +291,42 @@ const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick }) =>
     <div className={`p-3 rounded-xl ${colorClass} shadow-sm group-hover:scale-110 transition-transform`}><Icon className="w-6 h-6 text-white" /></div>
   </div>
 );
+
+// --- 元件：到期清單卡片（逾期 / 即將到期共用） ---
+const DueListCard = ({ title, icon: Icon, tone, rows, emptyText, renderBadge, onRowClick }) => {
+  const toneClass = tone === 'rose'
+    ? { head: 'text-rose-600', badge: 'bg-rose-100 text-rose-700 border-rose-200', row: 'hover:bg-rose-50/50' }
+    : { head: 'text-amber-600', badge: 'bg-amber-100 text-amber-700 border-amber-200', row: 'hover:bg-amber-50/50' };
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col h-[360px]">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className={`font-bold text-lg text-slate-800 flex items-center gap-2`}><Icon className={`w-5 h-5 ${toneClass.head}`} /> {title}</h3>
+        <span className="text-sm font-bold text-slate-400">{rows.length} 筆</span>
+      </div>
+      <div className="flex-1 overflow-y-auto -mx-1 px-1">
+        {rows.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-slate-400 text-sm">{emptyText}</div>
+        ) : (
+          <div className="space-y-2">
+            {rows.map(loan => (
+              <button key={loan.id} onClick={() => onRowClick(loan)} className={`w-full text-left border border-slate-100 rounded-xl px-3 py-2.5 transition-colors ${toneClass.row}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-slate-800 text-sm truncate">{loan.equipmentName} <span className="font-mono text-slate-400">x{loan.quantity}</span></span>
+                  <span className={`flex-shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full border ${toneClass.badge}`}>{renderBadge(loan)}</span>
+                </div>
+                <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                  <span className="flex items-center gap-1 truncate"><UserCheck className="w-3 h-3" />{loan.borrower || '—'}</span>
+                  {loan.phone && <span className="flex items-center gap-1 truncate"><Phone className="w-3 h-3" />{loan.phone}</span>}
+                  <span className="flex items-center gap-1 ml-auto flex-shrink-0"><Clock className="w-3 h-3" />應還 {loan.dueDate}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // --- 元件：實驗室成員管理 Modal（僅老師/高權限帳號） ---
 const MemberModal = ({ isOpen, onClose, members, onAdd, onUpdate, onRemove }) => {
@@ -555,7 +609,7 @@ export default function App() {
   };
   
   // Dashboard Stats
-  const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, groupedActivity: [] });
+  const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, overdue: [], dueSoon: [] });
 
   // UI State
   const [searchTerm, setSearchTerm] = useState('');
@@ -567,12 +621,31 @@ export default function App() {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState([]);
 
-  // Pagination State
+  // Pagination State（每頁筆數記在 localStorage，不進 Firestore）
   const [currentPage, setCurrentPage] = useState(1);
   const [currentLoanPage, setCurrentLoanPage] = useState(1);
+  const [pageSize, setPageSizeState] = useState(() => {
+    const saved = parseInt(localStorage.getItem('pageSize'), 10);
+    return PAGE_SIZE_OPTIONS.includes(saved) ? saved : DEFAULT_PAGE_SIZE;
+  });
+  const setPageSize = (n) => { localStorage.setItem('pageSize', String(n)); setPageSizeState(n); setCurrentPage(1); setCurrentLoanPage(1); };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
+
+  // 🟢 資料載入狀態：區分「還沒載完」與「真的沒資料」，並可在不重新整理頁面的情況下重新訂閱
+  const [reloadKey, setReloadKey] = useState(0);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [itemsLoaded, setItemsLoaded] = useState(false);
+
+  // 監聽失敗不再靜靜吞掉：Firestore 的 onSnapshot 一旦錯誤就永久停止推送，
+  // 沒有錯誤處理時畫面看起來只是「沒有資料」，而且只能重新整理頁面才會恢復。
+  // 必須宣告在下方各監聽 effect 之前——相依陣列在 render 當下就會求值。
+  // useCallback：參考位址要穩定，否則每次 render 都會重新訂閱。
+  const onListenerError = useCallback((label) => (err) => {
+    console.error(`[listener:${label}]`, err);
+    setToast({ message: `${label}載入失敗，請點右上角齒輪 →「重新載入資料」`, type: 'error' });
+  }, []);
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', action: null });
   const [returnDialog, setReturnDialog] = useState({ isOpen: false, loan: null }); 
   const [selectQuantityDialog, setSelectQuantityDialog] = useState({ isOpen: false, item: null }); 
@@ -583,7 +656,7 @@ export default function App() {
   const [editItem, setEditItem] = useState(null);
   
   // Forms State
-  const [sessionForm, setSessionForm] = useState({ name: '', date: '', year: '', stage: '初盤', copyFromPrevious: false });
+  const [sessionForm, setSessionForm] = useState({ name: '', date: '', year: '', stage: '初盤', copyFromId: '' });
   const [tableForm, setTableForm] = useState({ name: '' }); 
   const [equipForm, setEquipForm] = useState({ name: '', quantity: 1, categoryId: '', note: '', imageUrl: '', addDate: '' });
   const [propForm, setPropForm] = useState({ propId: '', name: '', brandModel: '', value: '', acquireDate: '', lifespan: '', user: '', location: '', note: '', status: '未盤點', imageUrl: '' });
@@ -601,6 +674,14 @@ export default function App() {
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const [isPwdModalOpen, setIsPwdModalOpen] = useState(false);
   const [pwdForm, setPwdForm] = useState({ old: '', new: '', confirm: '' });
+
+  // 🟢 Google 試算表匯入 State（設定值只存 localStorage，不動 Firestore）
+  const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState(localStorage.getItem('labSheetCsvUrl') || DEFAULT_LAB_SHEET_CSV_URL);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetError, setSheetError] = useState('');
+  const [sheetPasteText, setSheetPasteText] = useState('');
+  const [sheetPreview, setSheetPreview] = useState(null);
 
   // 🟢 實驗室成員授權管理（權限邏輯見 src/permissions.js）
   const userEmail = (user?.email || '').toLowerCase();
@@ -620,6 +701,8 @@ export default function App() {
   const colTablesName = appMode === 'lab' ? null : `tables_${appMode}`; 
   const colItemsName = appMode === 'lab' ? 'equipment' : `items_${appMode}`;
   const isLab = appMode === 'lab';
+  // 🟢 建良老師設備管理不是年度盤點作業，清單直接自訂名稱（不寫 year/stage 欄位，既有資料不受影響）
+  const freeFormSession = isLab || appMode === 'property_jl';
   const themeColor = isLab ? 'teal' : appMode === 'property_jl' ? 'blue' : 'indigo';
 
   useEffect(() => {
@@ -681,7 +764,8 @@ export default function App() {
 
   // Reset Filters, Selection & Navigation on Mode Change
   useEffect(() => {
-    setViewMode('dashboard');
+    // 🟢 進入系統直接落在清單／版次總覽（首頁概覽仍可從側邊欄或底部導覽進入）
+    setViewMode('sessions');
     setCurrentSession(null);
     setCurrentTable(null);
     setSearchTerm(''); setSearchDate(''); setSearchStatus('all'); setSelectedCategoryFilter('all');
@@ -689,7 +773,7 @@ export default function App() {
     setSelectedItemIds([]);
     setIsActionMenuOpen(false);
     setLayoutScale(1);
-    setCanvasPan({ x: 0, y: 0 }); 
+    setCanvasPan({ x: 0, y: 0 });
   }, [appMode]);
 
   // Reset Pagination & Selection when Filters/View Change
@@ -704,11 +788,14 @@ export default function App() {
   useEffect(() => {
     if (!user || !appMode) return;
     let unsubCat = () => {};
-    if (isLab) unsubCat = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), snap => setCategories(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+    if (isLab) unsubCat = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), snap => setCategories(snap.docs.map(d => ({id: d.id, ...d.data()}))), onListenerError('分類'));
     const qSession = query(collection(db, 'artifacts', appId, 'public', 'data', colSessionsName), orderBy('date', 'desc'));
-    const unsubSess = onSnapshot(qSession, snap => setSessions(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+    const unsubSess = onSnapshot(qSession, snap => {
+      setSessions(snap.docs.map(d => ({id: d.id, ...d.data()})));
+      setSessionsLoaded(true);
+    }, onListenerError('清單'));
     return () => { unsubCat(); unsubSess(); };
-  }, [user, appMode, isLab, colSessionsName]);
+  }, [user, appMode, isLab, colSessionsName, reloadKey, onListenerError]);
 
   useEffect(() => {
     if (!user || !currentSession || isLab || !colTablesName) {
@@ -726,9 +813,9 @@ export default function App() {
             if (prev && !fetchedTables.find(t => t.id === prev.id)) return fetchedTables.length > 0 ? fetchedTables[0] : null;
             return prev;
         });
-    });
+    }, onListenerError('表單'));
     return () => unsubTables();
-  }, [user, currentSession, isLab, colTablesName]);
+  }, [user, currentSession, isLab, colTablesName, reloadKey, onListenerError]);
 
   // Listener for Layout Items (Lab Only)
   useEffect(() => {
@@ -739,9 +826,9 @@ export default function App() {
     const qLayouts = query(collection(db, 'artifacts', appId, 'public', 'data', 'layouts'), where('sessionId', '==', currentSession.id));
     const unsubLayouts = onSnapshot(qLayouts, snap => {
         setLayoutItems(snap.docs.map(d => ({id: d.id, ...d.data()})));
-    });
+    }, onListenerError('配置圖'));
     return () => unsubLayouts();
-  }, [user, currentSession, isLab]);
+  }, [user, currentSession, isLab, reloadKey, onListenerError]);
 
   // 🟢 滾輪放大縮小效果 (Wheel Zoom logic)
   useEffect(() => {
@@ -780,7 +867,7 @@ export default function App() {
   useEffect(() => {
     if (!user || viewMode !== 'dashboard' || !appMode) return;
     if (sessions.length === 0) {
-        setDashboardStats({ latestSessionId: null, latestSessionName: '尚無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, groupedActivity: [] });
+        setDashboardStats({ latestSessionId: null, latestSessionName: '尚無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, overdue: [], dueSoon: [] });
         return;
     }
     const latestSession = sessions[0];
@@ -801,39 +888,31 @@ export default function App() {
         }
       });
       setDashboardStats(prev => ({ ...prev, latestSessionId: targetSessionId, latestSessionName: latestSession.name, totalItems: total, totalBorrowedOrInventoried: countA, lowStockOrUninventoried: countB }));
-    });
+    }, onListenerError('概覽統計'));
 
     let unsubLoans = () => {};
     if (isLab) {
         const qLoans = query(collection(db, 'artifacts', appId, 'public', 'data', 'loans'), where('sessionId', '==', targetSessionId));
         unsubLoans = onSnapshot(qLoans, (snap) => {
-          const rawEvents = [];
-          snap.forEach(doc => {
-            const data = doc.data();
-            const loanId = doc.id;
-            rawEvents.push({ id: loanId + '_borrow', originalId: loanId, sessionId: data.sessionId, type: 'borrow', date: data.borrowDate, borrower: data.borrower, equipmentName: data.equipmentName, quantity: data.quantity, timestamp: data.createdAt ? data.createdAt.seconds : 0 });
-            if (data.status === 'returned' && data.returnDate) rawEvents.push({ id: loanId + '_return', originalId: loanId, sessionId: data.sessionId, type: 'return', date: data.returnDate, borrower: data.borrower, equipmentName: data.equipmentName, quantity: data.quantity, timestamp: data.updatedAt ? data.updatedAt.seconds : Date.now()/1000 });
-          });
-          rawEvents.sort((a, b) => b.timestamp - a.timestamp);
-          const grouped = [];
-          rawEvents.forEach(event => {
-            const group = grouped.find(g => g.type === event.type && g.borrower === event.borrower && Math.abs(g.timestamp - event.timestamp) < 60 && g.date === event.date);
-            if (group) group.items.push({ name: event.equipmentName, quantity: event.quantity, id: event.id });
-            else grouped.push({ ...event, items: [{ name: event.equipmentName, quantity: event.quantity, id: event.id }] });
-          });
-          setDashboardStats(prev => ({ ...prev, groupedActivity: grouped.slice(0, 10) }));
-        });
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const { overdue, dueSoon } = splitLoansByDue(list, todayStr());
+          setDashboardStats(prev => ({ ...prev, overdue, dueSoon }));
+        }, onListenerError('借用到期'));
     }
 
     return () => { unsubItems(); unsubLoans(); };
-  }, [user, appMode, viewMode, sessions, isLab, colItemsName]); 
+  }, [user, appMode, viewMode, sessions, isLab, colItemsName, reloadKey, onListenerError]);
 
   // Session Data Items Listeners
   useEffect(() => {
     if (!user || !currentSession || !appMode) return;
+    setItemsLoaded(false);
     const qItems = query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', currentSession.id));
-    const unsubItems = onSnapshot(qItems, snap => setItemsList(snap.docs.map(d => ({id: d.id, ...d.data()}))));
-    
+    const unsubItems = onSnapshot(qItems, snap => {
+      setItemsList(snap.docs.map(d => ({id: d.id, ...d.data()})));
+      setItemsLoaded(true);
+    }, onListenerError(isLab ? '設備' : '財產'));
+
     let unsubLoans = () => {};
     if (isLab) {
         const qLoan = query(collection(db, 'artifacts', appId, 'public', 'data', 'loans'), where('sessionId', '==', currentSession.id));
@@ -841,12 +920,21 @@ export default function App() {
           const list = snap.docs.map(d => ({id: d.id, ...d.data()}));
           list.sort((a, b) => (a.borrowDate > b.borrowDate ? -1 : 1));
           setLoans(list);
-        });
+        }, onListenerError('借還紀錄'));
     }
     return () => { unsubItems(); unsubLoans(); };
-  }, [user, appMode, currentSession, isLab, colItemsName]);
+  }, [user, appMode, currentSession, isLab, colItemsName, reloadKey, onListenerError]);
 
   const showToast = (msg, type='success') => setToast({message: msg, type});
+
+  // 🟢 監聽失敗不再靜靜吞掉：Firestore 的 onSnapshot 一旦錯誤就永久停止推送，
+  // 沒有錯誤處理時畫面看起來就只是「沒有資料」，而且只能重新整理頁面才會恢復
+  const reloadData = () => {
+    setSessionsLoaded(false);
+    setItemsLoaded(false);
+    setReloadKey(k => k + 1);
+    showToast('重新載入資料中...');
+  };
 
   // 🟢 寫入防護：低權限（唯讀）一律擋下並提示
   const guardWrite = () => {
@@ -855,9 +943,14 @@ export default function App() {
     return false;
   };
   
-  const handleLogout = () => {
+  // 🟢 返回系統入口：只退出目前系統，保持 Google 登入狀態
+  const backToPortal = () => {
     localStorage.removeItem('appMode');
     setAppMode(null);
+  };
+
+  const handleLogout = () => {
+    backToPortal();
     // Google 帳號登出後，onAuthStateChanged 會自動改回匿名登入
     if (user && !user.isAnonymous) signOut(auth).catch(console.error);
   };
@@ -996,14 +1089,30 @@ export default function App() {
     reader.readAsArrayBuffer(file);
   };
 
+  // 🟢 共用匯出：sheets = [{ name, headers, rows }]
+  const downloadSheet = (filename, sheets) => {
+    if (!window.XLSX) { showToast("Excel 模組載入中，請稍後再試", "error"); return false; }
+    const XLSX = window.XLSX;
+    const workbook = XLSX.utils.book_new();
+    const used = new Set();
+    sheets.forEach((s, idx) => {
+      // 工作表名稱限制：不可含 []:*?/\ 且長度上限 31，且不可重複
+      let name = (s.name || `工作表${idx + 1}`).replace(/[[\]:*?/\\]/g, ' ').slice(0, 31) || `工作表${idx + 1}`;
+      while (used.has(name)) name = `${name.slice(0, 28)}_${idx + 1}`;
+      used.add(name);
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([s.headers, ...s.rows]), name);
+    });
+    XLSX.writeFile(workbook, filename);
+    showToast("Excel 下載已開始");
+    return true;
+  };
+
   const handleExportExcel = async (sessionToExport = currentSession, exportSelectedOnly = false) => {
     if (!sessionToExport) return;
-
     if (!window.XLSX) {
       showToast("Excel 模組載入中，請稍後再試", "error");
       return;
     }
-    const XLSX = window.XLSX;
 
     let exportItems = [];
     if (currentSession && sessionToExport.id === currentSession.id) {
@@ -1042,19 +1151,120 @@ export default function App() {
         });
     }
 
-    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "清單");
-
     const tablePrefix = (!isLab && currentTable && currentSession && sessionToExport.id === currentSession.id) ? `_${currentTable.name}` : '';
     const selectionPrefix = exportSelectedOnly ? '_選取項目' : '';
-    XLSX.writeFile(workbook, `${sessionToExport.name}${tablePrefix}${selectionPrefix}_清單.xlsx`);
-    
+    downloadSheet(`${sessionToExport.name}${tablePrefix}${selectionPrefix}_清單.xlsx`, [{ name: '清單', headers, rows }]);
+
     if (exportSelectedOnly) {
         setIsSelectionMode(false);
         setSelectedItemIds([]);
     }
-    showToast("Excel 下載已開始");
+  };
+
+  // 🟢 匯出借還紀錄（實驗室設備）
+  const handleExportLoans = () => {
+    if (!currentSession) return;
+    if (!loans.length) { showToast("無借還紀錄可匯出", "error"); return; }
+    const headers = ["狀態", "借用人", "電話", "設備", "數量", "用途", "借用日期", "預計歸還", "歸還日期"];
+    const rows = loans.map(l => [
+      l.status === 'borrowed' ? '借用中' : '已歸還',
+      l.borrower || '', l.phone || '', l.equipmentName || '', l.quantity || 0, l.purpose || '',
+      l.borrowDate || '', getExpectedReturnDate(l.borrowDate, l.borrowDays) || '', l.returnDate || '',
+    ]);
+    downloadSheet(`${currentSession.name}_借還紀錄.xlsx`, [{ name: '借還紀錄', headers, rows }]);
+  };
+
+  // 🟢 匯出成 Google 試算表同款欄位（實驗室設備），可直接貼回線上試算表
+  const handleExportSheetFormat = () => {
+    if (!currentSession) return;
+    if (!itemsList.length) { showToast("無資料可匯出", "error"); return; }
+    const rows = itemsList.map(item => {
+      // 借用人/日期/電話取該設備目前仍在借用中的第一筆紀錄；材料編號、信箱資料庫無對應欄位，留空
+      const loan = loans.find(l => l.status === 'borrowed' && l.equipmentName === item.name);
+      return [
+        item.name || '', '', item.quantity ?? 0,
+        loan?.borrower || '', loan?.borrowDate || '',
+        loan ? getExpectedReturnDate(loan.borrowDate, loan.borrowDays) : '',
+        loan?.phone || '', '', item.note || '',
+      ];
+    });
+    downloadSheet(`${currentSession.name}_試算表格式.xlsx`, [{ name: '材料設備', headers: SHEET_HEADERS, rows }]);
+  };
+
+  // 🟢 財產系統：整份清單合併匯出，每個表單一個工作表
+  const handleExportAllTables = async () => {
+    if (!currentSession || isLab) return;
+    try {
+      const snapshot = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', currentSession.id)));
+      const all = snapshot.docs.map(d => d.data());
+      if (!all.length) { showToast("無資料可匯出", "error"); return; }
+      const headers = ["所屬表單", "財產編號", "財產名稱", "廠牌型別", "現值", "取得日期", "使用年限", "使用人", "存置地點", "備註", "盤點狀況"];
+      const toRow = (item) => [item.tableName||'', item.propId||'', item.name||'', item.brandModel||'', item.value||'', item.acquireDate||'', item.lifespan||'', item.user||'', item.location||'', item.note||'', item.status||'未盤點'];
+      const sheets = tables.map(t => ({ name: t.name, headers, rows: all.filter(i => i.tableId === t.id).map(toRow) }));
+      const orphans = all.filter(i => !tables.some(t => t.id === i.tableId));
+      if (orphans.length) sheets.push({ name: '未歸屬表單', headers, rows: orphans.map(toRow) });
+      if (!sheets.length) { showToast("無資料可匯出", "error"); return; }
+      downloadSheet(`${currentSession.name}_全部表單.xlsx`, sheets);
+    } catch (err) { console.error(err); showToast("匯出失敗", "error"); }
+  };
+
+  // 🟢 Google 試算表單向匯入（試算表 → 系統，僅實驗室設備）
+  const openSheetModal = () => {
+    if (!guardWrite()) return;
+    if (!currentSession) { showToast("請先選擇版次", "error"); return; }
+    setSheetError(''); setSheetPreview(null); setSheetPasteText('');
+    setIsSheetModalOpen(true);
+  };
+
+  const buildSheetPreview = (csvText) => {
+    const rows = parseSheetRows(parseCSV(csvText));
+    if (!rows.length) { setSheetError('試算表沒有可匯入的資料（第一欄「材料設備」需有名稱）'); return; }
+    setSheetError('');
+    setSheetPreview(diffEquipment(rows, itemsList));
+  };
+
+  const handleSheetFetch = async () => {
+    setSheetBusy(true); setSheetError(''); setSheetPreview(null);
+    try {
+      const res = await fetch(sheetUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      localStorage.setItem('labSheetCsvUrl', sheetUrl);
+      buildSheetPreview(await res.text());
+    } catch (err) {
+      console.error(err);
+      setSheetError('無法讀取試算表（可能是瀏覽器跨網域限制）。請改用「檔案 → 共用 → 發佈到網路 → CSV」的連結，或直接在下方貼上 CSV 內容。');
+    } finally { setSheetBusy(false); }
+  };
+
+  const handleSheetApply = async () => {
+    if (!guardWrite()) return;
+    if (!currentSession || !sheetPreview) return;
+    const { toAdd, toUpdate } = sheetPreview;
+    if (!toAdd.length && !toUpdate.length) { showToast("沒有需要變更的資料"); setIsSheetModalOpen(false); return; }
+    setSheetBusy(true);
+    try {
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const today = now.toISOString().slice(0, 10);
+      const batch = writeBatch(db);
+      toAdd.forEach(row => {
+        // 欄位組合與 handleSaveItem 完全一致，不新增任何欄位
+        batch.set(doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName)), {
+          sessionId: currentSession.id, name: row.name, quantity: row.quantity,
+          categoryId: '', categoryName: '未分類', note: row.note, imageUrl: '',
+          addDate: today, borrowedCount: 0, lastUpdatedStr: stamp,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        });
+      });
+      // 只更新有變動的欄位，不碰 borrowedCount（避免弄壞借出中的庫存）
+      toUpdate.forEach(row => {
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', colItemsName, row.id), { ...row.changes, lastUpdatedStr: stamp, updatedAt: serverTimestamp() });
+      });
+      await batch.commit();
+      showToast(`匯入完成：新增 ${toAdd.length} 筆、更新 ${toUpdate.length} 筆`);
+      setIsSheetModalOpen(false); setSheetPreview(null);
+    } catch (err) { console.error(err); showToast("匯入失敗", "error"); }
+    finally { setSheetBusy(false); }
   };
 
   const deleteSession = (id) => {
@@ -1177,8 +1387,8 @@ export default function App() {
     e.preventDefault();
     if (!guardWrite()) return;
     try {
-      const sName = isLab ? sessionForm.name : `${sessionForm.year}年度-${sessionForm.stage}`;
-      const basePayload = { name: sName, date: sessionForm.date, createdBy: user.uid, ...(isLab ? {} : { year: sessionForm.year, stage: sessionForm.stage }) };
+      const sName = freeFormSession ? sessionForm.name : `${sessionForm.year}年度-${sessionForm.stage}`;
+      const basePayload = { name: sName, date: sessionForm.date, createdBy: user.uid, ...(freeFormSession ? {} : { year: sessionForm.year, stage: sessionForm.stage }) };
       let newSessionRef;
       
       if (editItem) {
@@ -1187,8 +1397,9 @@ export default function App() {
       } else {
         newSessionRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', colSessionsName), { ...basePayload, createdAt: serverTimestamp() });
         
-        if (sessionForm.copyFromPrevious && sessions.length > 0) {
-            const latestSession = sessions[0];
+        // 🟢 複製來源可指定任一既有清單，不限上一期
+        const latestSession = sessions.find(s => s.id === sessionForm.copyFromId);
+        if (latestSession) {
             const batch = writeBatch(db);
             let countItems = 0;
 
@@ -1337,10 +1548,10 @@ export default function App() {
     return result;
   }, [itemsList, searchTerm, searchDate, selectedCategoryFilter, searchStatus, sortOption, isLab, currentTable]);
 
-  const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
-  const paginatedItems = useMemo(() => { const startIndex = (currentPage - 1) * ITEMS_PER_PAGE; return filteredItems.slice(startIndex, startIndex + ITEMS_PER_PAGE); }, [filteredItems, currentPage]);
-  const totalLoanPages = Math.ceil(loans.length / ITEMS_PER_PAGE);
-  const paginatedLoans = useMemo(() => { const startIndex = (currentLoanPage - 1) * ITEMS_PER_PAGE; return loans.slice(startIndex, startIndex + ITEMS_PER_PAGE); }, [loans, currentLoanPage]);
+  const totalPages = Math.ceil(filteredItems.length / pageSize);
+  const paginatedItems = useMemo(() => { const startIndex = (currentPage - 1) * pageSize; return filteredItems.slice(startIndex, startIndex + pageSize); }, [filteredItems, currentPage, pageSize]);
+  const totalLoanPages = Math.ceil(loans.length / pageSize);
+  const paginatedLoans = useMemo(() => { const startIndex = (currentLoanPage - 1) * pageSize; return loans.slice(startIndex, startIndex + pageSize); }, [loans, currentLoanPage, pageSize]);
 
   const toggleSelection = (id) => {
       setSelectedItemIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
@@ -1355,7 +1566,7 @@ export default function App() {
 
   const openSessionModal = (item=null) => { 
       setModalType('session'); setEditItem(item); 
-      setSessionForm({ name: item ? item.name : '', date: item ? item.date : new Date().toISOString().slice(0,10), year: item ? item.year||'' : new Date().getFullYear()-1911, stage: item ? item.stage||'初盤' : '初盤', copyFromPrevious: false }); 
+      setSessionForm({ name: item ? item.name : '', date: item ? item.date : new Date().toISOString().slice(0,10), year: item ? item.year||'' : new Date().getFullYear()-1911, stage: item ? item.stage||'初盤' : '初盤', copyFromId: '' });
       setIsModalOpen(true); 
   };
   
@@ -1388,16 +1599,52 @@ export default function App() {
     setSelectQuantityDialog({ isOpen: false, item: null });
   };
   const updateCartQty = (id, delta) => { setCartItems(cartItems.map(c => { if(c.id === id) { const n = c.borrowQty + delta; if(n > 0 && n <= c.maxQty) return {...c, borrowQty: n}; } return c; })); };
+  const handleCartQtyInput = (id, value) => {
+    const n = parseInt(value, 10);
+    if (isNaN(n)) return;
+    setCartItems(cartItems.map(c => c.id === id ? { ...c, borrowQty: Math.max(1, Math.min(c.maxQty, n)) } : c));
+  };
+  const removeFromCart = (id) => setCartItems(cartItems.filter(c => c.id !== id));
   const handleBatchBorrow = async (e) => {
     e.preventDefault(); if (!guardWrite()) return; if (!currentSession) return; if (!cartItems.length) { showToast("請先加入設備", "error"); return; }
     try { 
-      const promises = cartItems.map(item => {
-        addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'loans'), { sessionId: currentSession.id, equipmentId: item.id, equipmentName: item.name, borrower: borrowForm.borrower, phone: borrowForm.phone, purpose: borrowForm.purpose, quantity: item.borrowQty, borrowDays: borrowForm.borrowDays, borrowDate: borrowForm.date, returnDate: null, status: 'borrowed', createdAt: serverTimestamp(), updatedAt: serverTimestamp() }); 
-        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'equipment', item.id), { borrowedCount: increment(item.borrowQty) }); 
-      });
+      // 🟢 兩個寫入都要回傳，Promise.all 才會真的等它們完成（失敗才會落到 catch）
+      const promises = cartItems.flatMap(item => [
+        addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'loans'), { sessionId: currentSession.id, equipmentId: item.id, equipmentName: item.name, borrower: borrowForm.borrower, phone: borrowForm.phone, purpose: borrowForm.purpose, quantity: item.borrowQty, borrowDays: borrowForm.borrowDays, borrowDate: borrowForm.date, returnDate: null, status: 'borrowed', createdAt: serverTimestamp(), updatedAt: serverTimestamp() }),
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'equipment', item.id), { borrowedCount: increment(item.borrowQty) }),
+      ]);
       await Promise.all(promises); setCartItems([]); setBorrowForm({ borrower: '', phone: '', date: new Date().toISOString().slice(0,10), purpose: '', borrowDays: 7 }); showToast("借出成功"); setViewMode('loans'); setMobileBorrowTab('equipment');
     } catch (err) { showToast("借用失敗", "error"); } 
   };
+  const initiateReturn = (loanId) => {
+    if (!guardWrite()) return;
+    const loan = loans.find(l => l.id === loanId);
+    if (loan) setReturnDialog({ isOpen: true, loan });
+  };
+
+  // 🟢 儀表板卡片／借用動態列：跳到對應版次與檢視
+  const handleStatClick = (kind) => {
+    const target = sessions.find(s => s.id === dashboardStats.latestSessionId) || sessions[0];
+    if (!target) { showToast('尚無資料可檢視', 'error'); return; }
+    setCurrentSession(target);
+    if (kind === 'borrowed') {
+      if (isLab) { setViewMode('loans'); return; }
+      setSearchStatus('已盤點');
+    } else if (kind === 'lowstock') {
+      if (isLab) setSortOption('quantity_asc');
+      else setSearchStatus('未盤點');
+    }
+    setViewMode('items');
+  };
+
+  // 點首頁的到期項目 → 跳到該版次的借還紀錄
+  const goToLoans = (loan) => {
+    const target = sessions.find(s => s.id === loan.sessionId) || sessions[0];
+    if (!target) return;
+    setCurrentSession(target);
+    setViewMode('loans');
+  };
+
   const handleReturnConfirm = async (loanId, returnQty, originalQty) => {
     if (!guardWrite()) return;
     try {
@@ -1682,7 +1929,13 @@ export default function App() {
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-teal-600 font-medium animate-pulse">系統環境載入中...</div>;
-  if (!user || !appMode || !isAuthorizedMember) return <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} access={access} membersLoaded={membersLoaded} isAdmin={isAdmin} members={members} onAddMember={handleAddMember} onUpdateMember={handleUpdateMember} onRemoveMember={handleRemoveMember} />;
+  // 🟢 Toast 也要在入口頁渲染，否則邀請成員的成功/失敗提示不會出現
+  if (!user || !appMode || !isAuthorizedMember) return (
+    <>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
+      <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} access={access} membersLoaded={membersLoaded} isAdmin={isAdmin} members={members} onAddMember={handleAddMember} onUpdateMember={handleUpdateMember} onRemoveMember={handleRemoveMember} />
+    </>
+  );
 
   const SysConfig = SYSTEM_CONFIGS.find(s => s.id === appMode) || SYSTEM_CONFIGS[0];
 
@@ -1719,18 +1972,68 @@ export default function App() {
         </div>
       )}
 
+      {/* 🟢 Google 試算表匯入 Modal（僅實驗室設備、可寫入權限） */}
+      {isSheetModalOpen && isLab && canEdit && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsSheetModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-5 border-b border-slate-100 pb-4">
+              <h3 className="text-xl font-bold text-teal-600 flex items-center gap-2"><FileSpreadsheet className="w-5 h-5"/> 從 Google 試算表匯入</h3>
+              <button onClick={() => setIsSheetModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
+            </div>
+
+            <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+              依「材料設備」名稱比對目前版次（{currentSession?.name}）的設備：名稱不存在則新增，存在則只更新數量與備註，不會動到已借出數量。<br/>
+              若讀取失敗，請於試算表點「檔案 → 共用 → 發佈到網路 → CSV」取得連結貼在下方，或直接貼上 CSV 內容。
+            </p>
+
+            <label className="text-sm font-bold text-slate-700 block mb-1">試算表 CSV 連結</label>
+            <div className="flex gap-2 mb-3">
+              <input value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} className="flex-1 border border-slate-200 rounded-lg p-2.5 text-xs outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
+              <button onClick={handleSheetFetch} disabled={sheetBusy} className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-4 rounded-lg font-bold text-sm whitespace-nowrap">{sheetBusy ? '讀取中...' : '讀取'}</button>
+            </div>
+
+            {sheetError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-lg mb-3 flex items-start gap-2"><AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5"/> {sheetError}</div>}
+
+            <label className="text-sm font-bold text-slate-700 block mb-1">或直接貼上 CSV 內容</label>
+            <textarea value={sheetPasteText} onChange={e => setSheetPasteText(e.target.value)} placeholder="材料設備,材料編號,數量,..." className="w-full border border-slate-200 rounded-lg p-2.5 h-24 text-xs font-mono resize-none outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
+            <button onClick={() => buildSheetPreview(sheetPasteText)} disabled={!sheetPasteText.trim()} className="w-full mt-2 border border-slate-200 text-slate-700 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 disabled:opacity-40">解析貼上的內容</button>
+
+            {sheetPreview && (
+              <div className="mt-5 border-t border-slate-100 pt-4">
+                <div className="flex gap-2 mb-3 text-xs font-bold">
+                  <span className="px-2.5 py-1.5 rounded-lg bg-teal-50 text-teal-700 border border-teal-100">新增 {sheetPreview.toAdd.length}</span>
+                  <span className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-100">更新 {sheetPreview.toUpdate.length}</span>
+                  <span className="px-2.5 py-1.5 rounded-lg bg-slate-50 text-slate-500 border border-slate-100">不變 {sheetPreview.unchanged}</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto space-y-1 text-xs bg-slate-50 rounded-lg p-2 border border-slate-100">
+                  {[...sheetPreview.toAdd.map(r => ({ t: '新增', name: r.name, detail: `數量 ${r.quantity}` })),
+                    ...sheetPreview.toUpdate.map(r => ({ t: '更新', name: r.name, detail: Object.entries(r.changes).map(([k, v]) => `${k === 'quantity' ? '數量' : '備註'} → ${v || '（清空）'}`).join('、') }))]
+                    .slice(0, 20).map((r, i) => (
+                      <div key={i} className="flex items-center gap-2 bg-white rounded px-2 py-1.5 border border-slate-100">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.t === '新增' ? 'bg-teal-100 text-teal-700' : 'bg-amber-100 text-amber-700'}`}>{r.t}</span>
+                        <span className="font-bold text-slate-700 truncate">{r.name}</span>
+                        <span className="text-slate-400 truncate ml-auto">{r.detail}</span>
+                      </div>
+                    ))}
+                  {sheetPreview.toAdd.length + sheetPreview.toUpdate.length === 0 && <div className="text-center text-slate-400 py-3">沒有需要變更的資料</div>}
+                  {sheetPreview.toAdd.length + sheetPreview.toUpdate.length > 20 && <div className="text-center text-slate-400 py-1">…等共 {sheetPreview.toAdd.length + sheetPreview.toUpdate.length} 筆</div>}
+                </div>
+                <button onClick={handleSheetApply} disabled={sheetBusy || (sheetPreview.toAdd.length + sheetPreview.toUpdate.length === 0)} className="w-full mt-4 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white py-3 rounded-xl font-bold shadow-md">{sheetBusy ? '寫入中...' : '確認匯入'}</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 🟢 實驗室成員管理 Modal（僅教師帳號） */}
       <MemberModal isOpen={isMemberModalOpen && isAdmin} onClose={() => setIsMemberModalOpen(false)} members={members} onAdd={handleAddMember} onUpdate={handleUpdateMember} onRemove={handleRemoveMember} />
 
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 w-64 bg-slate-900 text-slate-100 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
         <div className={`p-6 ${SysConfig.colorClass} flex items-center justify-between`}>
-          <h1 className="text-lg font-bold flex items-center gap-2"><SysConfig.icon className="w-5 h-5"/> {SysConfig.name}</h1>
-          <div className="flex items-center gap-1">
-             {/* 🟢 密碼修改與登出按鈕移至此處 */}
-             <button onClick={() => setIsPwdModalOpen(true)} title="更改密碼" className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Key className="w-4 h-4"/></button>
-             <button onClick={handleLogout} title="登出系統" className="p-1.5 text-white/80 hover:text-rose-200 hover:bg-white/20 rounded-md transition-colors"><LogOut className="w-4 h-4"/></button>
-          </div>
+          <h1 className="text-base font-bold flex items-center gap-2 min-w-0"><SysConfig.icon className="w-5 h-5 flex-shrink-0"/> <span className="truncate">{SysConfig.name}</span></h1>
+          {/* 🟢 只留「返回系統入口」；更改密碼與登出集中在右上角齒輪選單，避免標題被擠成兩行 */}
+          <button onClick={backToPortal} title="返回系統入口" className="flex-shrink-0 p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-md transition-colors"><Home className="w-4 h-4"/></button>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <button onClick={() => { setViewMode('dashboard'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'dashboard' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Home className="w-5 h-5" /> 首頁概覽</button>
@@ -1755,13 +2058,14 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50">
-        <header className="bg-white shadow-sm border-b border-slate-100 p-4 flex items-center justify-between z-20">
+        <header className="bg-white shadow-sm border-b border-slate-100 relative z-30 flex-shrink-0">
+        <div className="p-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
              <button onClick={()=>setIsSidebarOpen(!isSidebarOpen)} className="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-lg"><Menu/></button>
              <div>
                 <div className="min-w-0 flex-1 pr-2">
                   <h2 className="text-lg md:text-2xl font-bold text-slate-800 truncate max-w-[200px] md:max-w-md">
-                    {viewMode === 'sessions' && (isLab ? '版次管理' : '年度盤點清單')}
+                    {viewMode === 'sessions' && (isLab ? '版次管理' : freeFormSession ? '清單管理' : '年度盤點清單')}
                     {viewMode === 'categories' && '分類設定'}
                     {viewMode === 'dashboard' && '首頁概覽'}
                     {currentSession && viewMode === 'items' && currentSession.name}
@@ -1819,6 +2123,15 @@ export default function App() {
                     {viewMode === 'items' && !isSelectionMode && (
                       <>
                         <button onClick={() => { handleExportExcel(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出清單 Excel</button>
+                        {isLab && (
+                          <button onClick={() => { handleExportSheetFormat(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出（試算表格式）</button>
+                        )}
+                        {!isLab && (
+                          <button onClick={() => { handleExportAllTables(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-emerald-600"/> 匯出整份清單（各表單分頁）</button>
+                        )}
+                        {canEdit && isLab && (
+                          <button onClick={() => { setIsActionMenuOpen(false); openSheetModal(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 從 Google 試算表匯入</button>
+                        )}
                         {canEdit && !isLab && currentTable && (
                           <button onClick={() => { setIsActionMenuOpen(false); fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel 資料</button>
                         )}
@@ -1827,6 +2140,8 @@ export default function App() {
                     )}
 
                     {/* 全域選項 */}
+                    <button onClick={() => { reloadData(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Activity className="w-4 h-4 text-slate-500"/> 重新載入資料</button>
+                    <button onClick={() => { backToPortal(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Home className="w-4 h-4 text-slate-500"/> 返回系統入口</button>
                     {isAdmin && <button onClick={() => { setIsMemberModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><UserCheck className="w-4 h-4 text-blue-600"/> 實驗室成員管理</button>}
                     {isAdmin && <button onClick={() => { setIsPwdModalOpen(true); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><Key className="w-4 h-4 text-indigo-600"/> 更改系統密碼</button>}
                     <button onClick={() => { handleLogout(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 flex items-center gap-3 text-rose-600 font-bold transition-colors"><LogOut className="w-4 h-4"/> 登出系統</button>
@@ -1835,9 +2150,72 @@ export default function App() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* 🟢 搜尋／篩選整合在標頭第二列：標頭本來就固定不捲動，不需要 sticky，也就沒有黏頂穿透問題 */}
+        {viewMode === 'items' && currentSession && (isLab || tables.length > 0) && (
+          <div className="px-4 pb-3 flex flex-col md:flex-row gap-2 md:items-center border-t border-slate-100 pt-3">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
+              <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
+            </div>
+            <div className="flex gap-2 overflow-x-auto items-center hide-scrollbar">
+              <FilterField icon={Calendar} label="加入日期" active={!!searchDate}>
+                <input type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer" />
+              </FilterField>
+
+              {isLab && (
+              <FilterField icon={Filter} label="分類" active={selectedCategoryFilter !== 'all'}>
+                <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer max-w-[8rem]">
+                  <option value="all">所有分類</option>
+                  {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </FilterField>
+              )}
+
+              {!isLab && (
+              <FilterField icon={CheckSquare} label="狀況" active={searchStatus !== 'all'}>
+                <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                  <option value="all">全部狀況</option>
+                  <option value="未盤點">未盤點</option>
+                  <option value="已盤點">已盤點</option>
+                </select>
+              </FilterField>
+              )}
+
+              <FilterField icon={ArrowUpDown} label="排序" active={sortOption !== 'created_desc'}>
+                <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                  <option value="created_desc">預設（最新）</option>
+                  <option value="name">名稱排序</option>
+                  {isLab && <option value="quantity_desc">數量 (多→少)</option>}
+                  {isLab && <option value="quantity_asc">數量 (少→多)</option>}
+                  {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
+                  {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
+                </select>
+              </FilterField>
+
+              <FilterField icon={ListChecks} label="每頁" active={pageSize !== DEFAULT_PAGE_SIZE}>
+                <select value={pageSize} onChange={e=>setPageSize(parseInt(e.target.value, 10))} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                  {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} 筆</option>)}
+                </select>
+              </FilterField>
+
+              {(searchTerm || searchDate || selectedCategoryFilter !== 'all' || searchStatus !== 'all' || sortOption !== 'created_desc') && (
+                <button onClick={() => { setSearchTerm(''); setSearchDate(''); setSelectedCategoryFilter('all'); setSearchStatus('all'); setSortOption('created_desc'); }} className="flex-shrink-0 flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-rose-600 text-sm font-bold transition-colors">
+                  <X className="w-4 h-4"/> 清除
+                </button>
+              )}
+
+              <button onClick={() => { if (isSelectionMode) { setIsSelectionMode(false); setSelectedItemIds([]); } else { setIsSelectionMode(true); } }} className={`flex-shrink-0 flex items-center justify-center px-3 py-2 border rounded-lg transition-colors gap-1.5 text-sm font-bold ml-1 ${isSelectionMode ? `bg-${themeColor}-50 border-${themeColor}-300 ${SysConfig.textClass}` : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                <ListChecks className={`w-4 h-4 ${isSelectionMode ? SysConfig.textClass : 'text-slate-500'}`} />
+                <span className="hidden sm:inline">{isSelectionMode ? '取消選取' : '多重選取'}</span>
+              </button>
+            </div>
+          </div>
+        )}
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
           
           {/* Dashboard View */}
           {viewMode === 'dashboard' && (
@@ -1850,38 +2228,33 @@ export default function App() {
                 </div>
                 
                 {isLab ? (
-                <div className="grid grid-cols-1 gap-6">
-                    {/* 🟢 移除系統提示，並將表格寬度設為滿版 */}
-                    <div className="w-full bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col h-[400px]">
-                    <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><History className="w-5 h-5 text-teal-600"/> 最新借用動態</h3></div>
-                    <div className="flex-1 overflow-auto">
-                        <table className="w-full text-left min-w-[500px]">
-                        <thead className="text-slate-400 text-xs uppercase bg-slate-50 sticky top-0 z-10"><tr><th className="p-3">日期</th><th className="p-3">動作</th><th className="p-3">借用人</th><th className="p-3">物品清單</th></tr></thead>
-                        <tbody className="divide-y divide-slate-50 text-sm">
-                            {dashboardStats.groupedActivity.map((group, idx) => (
-                            <tr key={idx} onClick={() => handleActivityClick(group)} className="hover:bg-slate-50/80 cursor-pointer transition-colors group">
-                                <td className="p-3 text-slate-500 align-top">{group.date}</td>
-                                <td className="p-3 align-top">{group.type === 'borrow' ? <span className="flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-0.5 rounded text-xs w-fit font-bold border border-orange-100"><ArrowUpRight className="w-3 h-3"/> 借出</span> : <span className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-0.5 rounded text-xs w-fit font-bold border border-green-100"><ArrowDownLeft className="w-3 h-3"/> 歸還</span>}</td>
-                                <td className="p-3 font-medium text-slate-700 align-top">{group.borrower}</td>
-                                <td className="p-3 align-top">
-                                    <div className="flex flex-wrap gap-2">
-                                        {group.items.map((item, i) => ( <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-2 py-1 rounded text-xs border border-slate-200">{item.name} <span className="font-bold text-slate-500">x{item.quantity}</span></span> ))}
-                                    </div>
-                                </td>
-                            </tr>
-                            ))}
-                            {dashboardStats.groupedActivity.length===0 && <tr><td colSpan="4" className="p-6 text-center text-slate-400">近期無活動</td></tr>}
-                        </tbody>
-                        </table>
-                    </div>
-                    </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* 🟢 逾期未歸還：由借用日期 + 預計天數推算應歸還日，逾期最久的排最前面 */}
+                    <DueListCard
+                      title="逾期未歸還"
+                      icon={AlertTriangle}
+                      tone="rose"
+                      rows={dashboardStats.overdue}
+                      emptyText="沒有逾期項目 👍"
+                      renderBadge={(l) => `逾期 ${Math.abs(l.daysLeft)} 天`}
+                      onRowClick={goToLoans}
+                    />
+                    <DueListCard
+                      title="即將到期（3 天內）"
+                      icon={Timer}
+                      tone="amber"
+                      rows={dashboardStats.dueSoon}
+                      emptyText="近期沒有到期項目"
+                      renderBadge={(l) => (l.daysLeft === 0 ? '今天到期' : `剩 ${l.daysLeft} 天`)}
+                      onRowClick={goToLoans}
+                    />
                 </div>
                 ) : (
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center mt-6">
                      <div className="mx-auto w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mb-4"><CheckSquare className="w-8 h-8"/></div>
-                     <h3 className="text-xl font-bold text-slate-700 mb-2">開始盤點作業</h3>
-                     <p className="text-slate-500 mb-6 max-w-md mx-auto">請前往「清單總覽」選擇您要進行盤點的年度與階段。您可以隨時匯入學校提供的 Excel 清單，或是將盤點結果匯出為 Excel 檔案以利歸檔。</p>
-                     <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); }} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>前往盤點清單總覽</button>
+                     <h3 className="text-xl font-bold text-slate-700 mb-2">{freeFormSession ? '開始管理設備' : '開始盤點作業'}</h3>
+                     <p className="text-slate-500 mb-6 max-w-md mx-auto">{freeFormSession ? '請前往「清單總覽」選擇或建立清單。清單名稱可自由命名，不限定年度或盤點階段；資料可隨時以 Excel 匯入匯出。' : '請前往「清單總覽」選擇您要進行盤點的年度與階段。您可以隨時匯入學校提供的 Excel 清單，或是將盤點結果匯出為 Excel 檔案以利歸檔。'}</p>
+                     <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); }} className={`px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>前往清單總覽</button>
                   </div>
                 )}
              </div>
@@ -1912,7 +2285,7 @@ export default function App() {
                   </div>
                 </div>
               ))}
-              {sessions.length === 0 && <div className="col-span-full text-center py-20 text-slate-400">尚未建立任何清單，請點擊右上角「新增」。</div>}
+              {sessions.length === 0 && <div className="col-span-full text-center py-20 text-slate-400">{sessionsLoaded ? '尚未建立任何清單，請點擊右上角「新增」。' : <span className="animate-pulse">載入中...</span>}</div>}
             </div>
           )}
 
@@ -1953,85 +2326,7 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                  {/* Filter Bar */}
-                  <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl shadow-sm border border-slate-200 z-10 sticky top-0">
-                    <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4"/>
-                      <input type="text" placeholder={isLab ? "搜尋設備名稱、備註..." : "搜尋財產名稱或編號..."} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-slate-300 bg-slate-50 focus:bg-white transition-colors text-sm"/>
-                    </div>
-                    <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 items-center hide-scrollbar">
-                        
-                        {/* Date Filter */}
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                                <Calendar className={`w-4 h-4 ${searchDate ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <input type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title={searchDate ? `已篩選: ${searchDate}` : "依加入日期篩選"} />
-                            </div>
-                            {searchDate && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchDate} <button onClick={()=>setSearchDate('')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                        </div>
-                        
-                        {/* Lab Category Filter */}
-                        {isLab && (
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                                <Filter className={`w-4 h-4 ${selectedCategoryFilter !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類">
-                                  <option value="all">所有分類</option>
-                                  {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                            </div>
-                            {selectedCategoryFilter !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{categories.find(c => c.id === selectedCategoryFilter)?.name} <button onClick={()=>setSelectedCategoryFilter('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                        </div>
-                        )}
-
-                        {/* Property Status Filter */}
-                        {!isLab && (
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                                <CheckSquare className={`w-4 h-4 ${searchStatus !== 'all' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={searchStatus} onChange={e=>setSearchStatus(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選盤點狀況">
-                                  <option value="all">全部狀況</option>
-                                  <option value="未盤點">未盤點</option>
-                                  <option value="已盤點">已盤點</option>
-                                </select>
-                            </div>
-                            {searchStatus !== 'all' && <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>{searchStatus} <button onClick={()=>setSearchStatus('all')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                        </div>
-                        )}
-
-                        {/* Sort Options */}
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                            <div className="relative flex items-center justify-center px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                                <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'created_desc' ? SysConfig.textClass : 'text-slate-500'}`} />
-                                <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式">
-                                    <option value="created_desc" hidden>預設(最新)</option>
-                                    <option value="name">名稱排序</option>
-                                    {isLab && <option value="quantity_desc">數量 (多→少)</option>}
-                                    {isLab && <option value="quantity_asc">數量 (少→多)</option>}
-                                    {!isLab && <option value="propId_asc">財產編號 (小→大)</option>}
-                                    {!isLab && <option value="propId_desc">財產編號 (大→小)</option>}
-                                </select>
-                            </div>
-                            {sortOption !== 'created_desc' && (
-                               <div className={`flex items-center gap-1 bg-opacity-10 px-2 py-1.5 rounded-lg border text-xs font-bold ${SysConfig.textClass} ${SysConfig.colorClass.replace('bg-','border-').replace('600','200')} ${SysConfig.colorClass.replace('bg-','bg-').replace('600','50')}`}>
-                                 {sortOption === 'name' && '名稱排序'}
-                                 {sortOption === 'quantity_desc' && '數量 (多→少)'}
-                                 {sortOption === 'quantity_asc' && '數量 (少→多)'}
-                                 {sortOption === 'propId_asc' && '編號 (小→大)'}
-                                 {sortOption === 'propId_desc' && '編號 (大→小)'}
-                                 <button onClick={()=>setSortOption('created_desc')} className="hover:bg-black/10 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button>
-                               </div>
-                            )}
-                        </div>
-
-                        <div className="flex items-center gap-1 flex-shrink-0 border-l border-slate-200 pl-2 ml-1">
-                            <button onClick={() => { if (isSelectionMode) { setIsSelectionMode(false); setSelectedItemIds([]); } else { setIsSelectionMode(true); } }} className={`flex items-center justify-center px-3 py-2 border rounded-lg transition-colors cursor-pointer gap-1.5 shadow-sm text-sm font-bold ${isSelectionMode ? `bg-${themeColor}-50 border-${themeColor}-300 ${SysConfig.textClass}` : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
-                              <ListChecks className={`w-4 h-4 ${isSelectionMode ? SysConfig.textClass : 'text-slate-500'}`} />
-                              <span className="hidden sm:inline">{isSelectionMode ? '取消選取' : '多重選取'}</span>
-                            </button>
-                        </div>
-                    </div>
-                  </div>
+                  {/* 🟢 搜尋與篩選已整合至頁面標頭（見 header），此處不再重複渲染 */}
 
                   {/* Mobile Card View (Paginated with Selection) */}
                   <div className="block md:hidden">
@@ -2139,7 +2434,7 @@ export default function App() {
                           </div>
                         );
                       })}
-                      {filteredItems.length===0 && <div className="text-center py-10 text-slate-400">沒有找到相符資料</div>}
+                      {filteredItems.length===0 && <div className="text-center py-10 text-slate-400">{itemsLoaded ? '沒有找到相符資料' : <span className="animate-pulse">載入中...</span>}</div>}
                     </div>
                     <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                   </div>
@@ -2148,7 +2443,8 @@ export default function App() {
                   <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 sticky top-0 z-10 shadow-sm">
+                        {/* 篩選列已佔住黏頂位置，表頭再 sticky 會被壓在後面變成鬼影 */}
+                        <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500">
                             <tr>
                             {/* Master Checkbox Header */}
                             {isSelectionMode && (
@@ -2289,7 +2585,7 @@ export default function App() {
                                 </tr>
                             );
                             })}
-                            {filteredItems.length === 0 && <tr><td colSpan={isSelectionMode ? 7 : 6} className="p-12 text-center text-slate-400">沒有找到相符資料</td></tr>}
+                            {filteredItems.length === 0 && <tr><td colSpan={isSelectionMode ? 7 : 6} className="p-12 text-center text-slate-400">{itemsLoaded ? '沒有找到相符資料' : <span className="animate-pulse">載入中...</span>}</td></tr>}
                         </tbody>
                         </table>
                     </div>
@@ -2415,20 +2711,20 @@ export default function App() {
                           <input type="text" placeholder="輸入名稱搜尋..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 bg-white text-sm"/>
                         </div>
                         <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                                <div className="relative flex items-center justify-center px-3 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
-                                    <Filter className={`w-4 h-4 ${selectedCategoryFilter !== 'all' ? 'text-teal-600' : 'text-slate-500'}`} />
-                                    <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="篩選分類"><option value="all">所有分類</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
-                                </div>
-                                {selectedCategoryFilter !== 'all' && <div className="flex items-center gap-1 bg-teal-50 text-teal-700 px-2 py-1 rounded-lg border border-teal-200 text-xs font-bold">{categories.find(c => c.id === selectedCategoryFilter)?.name} <button onClick={()=>setSelectedCategoryFilter('all')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                                <div className="relative flex items-center justify-center px-3 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
-                                    <ArrowUpDown className={`w-4 h-4 ${sortOption !== 'created_desc' ? 'text-teal-600' : 'text-slate-500'}`} />
-                                    <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="排序方式"><option value="created_desc" hidden>預設</option><option value="name">名稱排序</option><option value="quantity_desc">數量 (多→少)</option><option value="quantity_asc">數量 (少→多)</option></select>
-                                </div>
-                                {sortOption !== 'created_desc' && <div className="flex items-center gap-1 bg-teal-50 text-teal-700 px-2 py-1 rounded-lg border border-teal-200 text-xs font-bold">{sortOption === 'name' ? '名稱排序' : sortOption === 'quantity_desc' ? '數量 (多→少)' : '數量 (少→多)'} <button onClick={()=>setSortOption('created_desc')} className="hover:bg-teal-200 p-0.5 rounded-full transition-colors"><X className="w-3 h-3"/></button></div>}
-                            </div>
+                            <FilterField icon={Filter} label="分類" active={selectedCategoryFilter !== 'all'}>
+                              <select value={selectedCategoryFilter} onChange={e=>setSelectedCategoryFilter(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer max-w-[8rem]">
+                                <option value="all">所有分類</option>
+                                {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            </FilterField>
+                            <FilterField icon={ArrowUpDown} label="排序" active={sortOption !== 'created_desc'}>
+                              <select value={sortOption} onChange={e=>setSortOption(e.target.value)} className="bg-transparent text-sm text-slate-700 outline-none cursor-pointer">
+                                <option value="created_desc">預設（最新）</option>
+                                <option value="name">名稱排序</option>
+                                <option value="quantity_desc">數量 (多→少)</option>
+                                <option value="quantity_asc">數量 (少→多)</option>
+                              </select>
+                            </FilterField>
                         </div>
                       </div>
                    </div>
@@ -2502,9 +2798,12 @@ export default function App() {
           {/* 🟡 [PAGINATED] Loan History View (LAB ONLY) */}
           {isLab && viewMode === 'loans' && currentSession && (
             <div className="space-y-4 animate-in fade-in duration-300">
-              <div className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center sticky top-0 z-30 shadow-sm">
+              <div className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><History className="w-5 h-5 text-teal-600"/> 借用與歸還紀錄</h3>
-                <span className="text-xs bg-teal-50 text-teal-700 border border-teal-100 px-2.5 py-1 rounded-full font-bold">共 {loans.length} 筆</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-teal-50 text-teal-700 border border-teal-100 px-2.5 py-1 rounded-full font-bold">共 {loans.length} 筆</span>
+                  <button onClick={handleExportLoans} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95 text-sm font-bold"><FileDown className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline">匯出紀錄</span></button>
+                </div>
               </div>
               <div className="block md:hidden space-y-4">
                 {paginatedLoans.map(loan => (
@@ -2530,7 +2829,7 @@ export default function App() {
               <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm min-w-[1000px]">
-                    <thead className="bg-slate-50 border-b uppercase text-slate-500 text-xs sticky top-0 z-20 shadow-sm">
+                    <thead className="bg-slate-50 border-b uppercase text-slate-500 text-xs">
                       <tr><th className="p-4 font-semibold w-24">狀態</th><th className="p-4 font-semibold w-48">借用人資訊</th><th className="p-4 font-semibold w-48">設備 (數量)</th><th className="p-4 font-semibold w-64">借用用途</th><th className="p-4 font-semibold w-32">借用日期</th><th className="p-4 font-semibold w-32">歸還日期</th><th className="p-4 font-semibold text-right w-32 sticky right-0 bg-slate-50">動作</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -2577,13 +2876,46 @@ export default function App() {
         </div>
       </main>
 
+      {/* 🟢 手機底部導覽列：不用再開側邊欄就能切換主要頁面 */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 shadow-[0_-2px_10px_rgba(0,0,0,0.05)] flex">
+        {[
+          { key: 'dashboard', label: '概覽', icon: Home },
+          { key: 'sessions', label: isLab ? '版次' : '清單', icon: FolderOpen },
+          { key: 'items', label: isLab ? '設備' : '財產', icon: LayoutGrid, needsSession: true },
+          ...(isLab && canEdit ? [{ key: 'borrow-request', label: '借用', icon: ShoppingCart, needsSession: true }] : []),
+          ...(isLab ? [{ key: 'loans', label: '紀錄', icon: History, needsSession: true }] : []),
+        ].map(tab => {
+          const Icon = tab.icon;
+          const activeTab = viewMode === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setIsSidebarOpen(false);
+                if (tab.needsSession && !currentSession) {
+                  if (sessions.length === 0) { showToast(isLab ? '請先建立版次' : '請先建立清單', 'error'); return; }
+                  setCurrentSession(sessions[0]);
+                } else if (!tab.needsSession) {
+                  setCurrentSession(null);
+                }
+                setViewMode(tab.key);
+              }}
+              className={`flex-1 py-2.5 flex flex-col items-center gap-0.5 transition-colors ${activeTab ? SysConfig.textClass : 'text-slate-400'}`}
+            >
+              <Icon className="w-5 h-5" />
+              <span className="text-[10px] font-bold">{tab.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
       {/* Modals (Forms) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={()=>setIsModalOpen(false)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className={`text-xl font-bold ${SysConfig.textClass} flex items-center gap-2`}>
-                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯清單') : (isLab ? '新增版次' : '建立年度清單'))}
+                {modalType === 'session' && (editItem ? (isLab ? '編輯版次' : '編輯清單') : (isLab ? '新增版次' : freeFormSession ? '建立清單' : '建立年度清單'))}
                 {modalType === 'table' && (editItem ? '編輯表單名稱' : '新增表單')}
                 {modalType === 'item' && (editItem ? (isLab ? '編輯設備' : '編輯財產') : (isLab ? '新增設備' : '新增財產'))}
                 {modalType === 'category' && (editItem ? '編輯分類' : '新增分類')}
@@ -2595,8 +2927,8 @@ export default function App() {
             {/* Session Form */}
             {modalType === 'session' && (
               <form onSubmit={handleSaveSession} className="space-y-4">
-                {isLab ? (
-                    <div><label className="text-sm font-bold text-slate-700 mb-1 block">版次名稱</label><input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none" value={sessionForm.name} onChange={e=>setSessionForm({...sessionForm, name:e.target.value})} placeholder="例如: 2023 上學期" required/></div>
+                {freeFormSession ? (
+                    <div><label className="text-sm font-bold text-slate-700 mb-1 block">{isLab ? '版次名稱' : '清單名稱'}</label><input className={`w-full border border-slate-200 rounded-lg p-2.5 focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={sessionForm.name} onChange={e=>setSessionForm({...sessionForm, name:e.target.value})} placeholder={isLab ? "例如: 2023 上學期" : "例如: 研究室設備、專題室器材"} required autoFocus/></div>
                 ) : (
                     <div className="grid grid-cols-2 gap-4">
                         <div><label className="text-sm font-bold text-slate-700 mb-1 block">盤點年度</label><input type="number" className={`w-full border border-slate-200 rounded-lg p-2.5 focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={sessionForm.year} onChange={e=>setSessionForm({...sessionForm, year:e.target.value})} placeholder="例如: 113" required/></div>
@@ -2607,9 +2939,13 @@ export default function App() {
                 <div><label className="text-sm font-bold text-slate-700 mb-1 block">建立日期</label><input type="date" className={`w-full border border-slate-200 rounded-lg p-2.5 focus:border-${themeColor}-500 focus:ring-1 focus:ring-${themeColor}-500 outline-none`} value={sessionForm.date} onChange={e=>setSessionForm({...sessionForm, date:e.target.value})} required/></div>
                 
                 {!editItem && sessions.length > 0 && (
-                  <div className={`flex items-center gap-3 p-4 bg-${themeColor}-50 rounded-xl border border-${themeColor}-100`}>
-                    <input type="checkbox" id="copyFromPrevious" className={`w-5 h-5 text-${themeColor}-600 rounded focus:ring-${themeColor}-500 cursor-pointer`} checked={sessionForm.copyFromPrevious} onChange={e=>setSessionForm({...sessionForm, copyFromPrevious:e.target.checked})}/>
-                    <label htmlFor="copyFromPrevious" className={`text-sm text-${themeColor}-800 cursor-pointer select-none leading-relaxed`}><span className="font-bold block">複製上一期的{isLab?'設備':'財產'}資料？</span><span className={`text-xs text-${themeColor}-600/80`}>{isLab ? '將複製名稱、分類、總數等，借出數會歸零' : '將複製所有表單與財產資料，盤點狀況會重置為「未盤點」'}</span></label>
+                  <div className={`p-4 bg-${themeColor}-50 rounded-xl border border-${themeColor}-100 space-y-2`}>
+                    <label className={`text-sm font-bold text-${themeColor}-800 block`}>從既有清單複製{isLab?'設備':'財產'}資料</label>
+                    <select value={sessionForm.copyFromId} onChange={e=>setSessionForm({...sessionForm, copyFromId:e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 bg-white outline-none focus:border-slate-400 text-sm">
+                      <option value="">不複製（建立空白清單）</option>
+                      {sessions.map(s => <option key={s.id} value={s.id}>{s.name}（{s.date}）</option>)}
+                    </select>
+                    <p className={`text-xs text-${themeColor}-600/80 leading-relaxed`}>{isLab ? '將複製名稱、分類、總數與配置圖，借出數會歸零' : '將複製所有表單與財產資料，盤點狀況會重置為「未盤點」'}</p>
                   </div>
                 )}
                 <button type="submit" className={`w-full text-white py-3 rounded-xl font-bold shadow-md mt-6 transition-colors ${SysConfig.colorClass} ${SysConfig.hoverClass}`}>儲存建立</button>
