@@ -34,10 +34,11 @@ import {
   MousePointerClick, Timer, ShoppingCart, Minus, ArrowUpDown,
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
   FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut,
-  Key, GripHorizontal
+  Key, GripHorizontal, Grid3x3, PackageOpen
 } from 'lucide-react';
 
 import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
+import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { addDays, splitLoansByDue } from './loanDue';
 
@@ -328,6 +329,128 @@ const DueListCard = ({ title, icon: Icon, tone, rows, emptyText, renderBadge, on
   );
 };
 
+// --- 🟢 櫃位狀態配色（空的 / 有貨 / 低庫存 / 全借出），地圖與圖例共用 ---
+const SLOT_STYLES = {
+  empty: { cell: 'bg-slate-50 border-slate-200 text-slate-300 hover:border-slate-300', dot: 'bg-slate-200', label: '空的' },
+  ok:    { cell: 'bg-teal-50 border-teal-300 text-teal-800 hover:border-teal-500', dot: 'bg-teal-500', label: '有貨' },
+  low:   { cell: 'bg-amber-50 border-amber-300 text-amber-800 hover:border-amber-500', dot: 'bg-amber-500', label: '低庫存' },
+  out:   { cell: 'bg-rose-50 border-rose-300 text-rose-800 hover:border-rose-500', dot: 'bg-rose-500', label: '全借出' },
+};
+
+// --- 元件：櫃位地圖（可點擊的抽屜網格；compact 為首頁用的迷你版） ---
+const CabinetGrid = ({ grid, cols, selectedSlot, onSelect, compact = false, statusFilter = 'all' }) => (
+  <div className="overflow-x-auto">
+    {/* compact（首頁迷你版）限寬，避免寬螢幕上格子被拉得又寬又扁 */}
+    <div className={compact ? 'w-full max-w-2xl' : 'inline-block min-w-full'}>
+      {/* 欄標題 A B C… */}
+      <div className="grid gap-1 mb-1" style={{ gridTemplateColumns: `${compact ? '1.25rem' : '1.75rem'} repeat(${cols}, minmax(0, 1fr))` }}>
+        <div />
+        {Array.from({ length: cols }, (_, c) => (
+          <div key={c} className={`text-center font-bold text-slate-400 ${compact ? 'text-[9px]' : 'text-xs'}`}>{colLetter(c)}</div>
+        ))}
+      </div>
+      {/* 每一列：列號 + 格子 */}
+      {Array.from(new Set(grid.map(g => g.row))).map(row => (
+        <div key={row} className="grid gap-1 mb-1" style={{ gridTemplateColumns: `${compact ? '1.25rem' : '1.75rem'} repeat(${cols}, minmax(0, 1fr))` }}>
+          <div className={`flex items-center justify-center font-bold text-slate-400 ${compact ? 'text-[9px]' : 'text-xs'}`}>{row}</div>
+          {grid.filter(g => g.row === row).map(cell => {
+            const style = SLOT_STYLES[cell.status];
+            const dimmed = statusFilter !== 'all' && cell.status !== statusFilter;
+            const selected = selectedSlot === cell.slot;
+            return (
+              <button
+                key={cell.slot}
+                onClick={() => onSelect && onSelect(cell)}
+                title={`${cell.slot}｜${style.label}${cell.items.length ? `｜${cell.items.map(i => i.name).join('、')}` : ''}`}
+                className={`border-2 rounded-md transition-all flex flex-col items-center justify-center leading-none
+                  ${compact ? 'h-5 text-[8px] rounded' : 'h-12 md:h-14 text-[10px] md:text-xs active:scale-95'}
+                  ${style.cell} ${dimmed ? 'opacity-25' : ''}
+                  ${selected ? 'ring-2 ring-teal-500 ring-offset-1 border-teal-500 shadow-md' : ''}`}
+              >
+                <span className="font-bold">{cell.slot}</span>
+                {!compact && cell.items.length > 0 && (
+                  <span className="mt-0.5 font-mono opacity-80">{cell.available}/{cell.total}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+// --- 元件：櫃位詳細資訊面板（點格子後顯示該格設備） ---
+const CabinetDetail = ({ cell, categories, canEdit, onEdit, onBorrow, onImageClick, fallbackImage }) => {
+  if (!cell) return (
+    <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-400">
+      <PackageOpen className="w-12 h-12 mb-3 opacity-40" />
+      <p className="font-medium text-sm">點選左側任一格查看內容</p>
+      <p className="text-xs mt-1 opacity-70">格子上的數字為「可借 / 總數」</p>
+    </div>
+  );
+
+  const style = SLOT_STYLES[cell.status];
+  return (
+    <div className="p-4 md:p-5 space-y-4">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="flex items-center gap-3">
+          <div className={`w-12 h-12 rounded-xl border-2 flex items-center justify-center font-extrabold ${style.cell}`}>{cell.slot}</div>
+          <div>
+            <p className="text-xs text-slate-400 font-medium">櫃位</p>
+            <p className="font-bold text-slate-700 flex items-center gap-1.5 text-sm">
+              <span className={`w-2 h-2 rounded-full ${style.dot}`} /> {style.label}
+            </p>
+          </div>
+        </div>
+        {cell.items.length > 0 && (
+          <div className="text-right">
+            <p className="text-xs text-slate-400 font-medium">可借 / 總數</p>
+            <p className="font-mono font-bold text-slate-700">{cell.available} / {cell.total}</p>
+          </div>
+        )}
+      </div>
+
+      {cell.items.length === 0 ? (
+        <p className="text-sm text-slate-400 text-center py-8">此櫃位目前沒有設備</p>
+      ) : cell.items.map(item => {
+        const available = Math.max(0, (item.quantity || 0) - (item.borrowedCount || 0));
+        return (
+          <div key={item.id} className="bg-slate-50 rounded-xl border border-slate-100 p-3 flex gap-3">
+            <img
+              src={item.imageUrl || fallbackImage}
+              alt={item.name}
+              onClick={() => item.imageUrl && onImageClick(item.imageUrl)}
+              className={`w-20 h-20 object-cover rounded-lg border border-slate-200 bg-white flex-shrink-0 ${item.imageUrl ? 'cursor-zoom-in' : 'opacity-40 p-4'}`}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-slate-800 text-sm break-words leading-tight">{item.name}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{item.categoryName || categories.find(c => c.id === item.categoryId)?.name || '未分類'}</p>
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                <span className="font-mono text-[11px] text-slate-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded">總 {item.quantity}</span>
+                <span className="font-mono text-[11px] text-orange-600 bg-orange-50 border border-orange-100 px-1.5 py-0.5 rounded">借 {item.borrowedCount || 0}</span>
+                <span className={`font-mono text-[11px] px-1.5 py-0.5 rounded border font-bold ${available === 0 ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-700 border-emerald-100'}`}>剩 {available}</span>
+              </div>
+              {item.note && <p className="text-xs text-slate-500 mt-2 break-words">{item.note}</p>}
+              {item.addDate && <p className="text-[11px] text-slate-400 mt-1">加入：{item.addDate}</p>}
+              {canEdit && (
+                <div className="flex gap-1.5 mt-2.5">
+                  <button onClick={() => onBorrow(item)} disabled={available <= 0} className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 text-white shadow-sm transition-all active:scale-95 ${available <= 0 ? 'bg-slate-300 cursor-not-allowed' : 'bg-teal-600 hover:bg-teal-700'}`}>
+                    <Plus className="w-3 h-3"/> 借用
+                  </button>
+                  <button onClick={() => onEdit(item)} className="px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 flex items-center gap-1 transition-colors">
+                    <Edit2 className="w-3 h-3"/> 編輯
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // --- 元件：實驗室成員管理 Modal（僅老師/高權限帳號） ---
 const MemberModal = ({ isOpen, onClose, members, onAdd, onUpdate, onRemove }) => {
   const emptyForm = { email: '', level: 'mid', systems: [...SYSTEM_IDS] };
@@ -609,14 +732,18 @@ export default function App() {
   };
   
   // Dashboard Stats
-  const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, overdue: [], dueSoon: [] });
+  const [dashboardStats, setDashboardStats] = useState({ latestSessionId: null, latestSessionName: '無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, overdue: [], dueSoon: [], latestItems: [] });
 
   // UI State
   const [searchTerm, setSearchTerm] = useState('');
   const [searchDate, setSearchDate] = useState(''); 
   const [searchStatus, setSearchStatus] = useState('all'); 
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all'); 
-  const [sortOption, setSortOption] = useState('created_desc'); 
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
+  const [sortOption, setSortOption] = useState('created_desc');
+
+  // 🟢 櫃位圖 State
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [slotFilter, setSlotFilter] = useState('all');
   
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState([]);
@@ -658,7 +785,7 @@ export default function App() {
   // Forms State
   const [sessionForm, setSessionForm] = useState({ name: '', date: '', year: '', stage: '初盤', copyFromId: '' });
   const [tableForm, setTableForm] = useState({ name: '' }); 
-  const [equipForm, setEquipForm] = useState({ name: '', quantity: 1, categoryId: '', note: '', imageUrl: '', addDate: '' });
+  const [equipForm, setEquipForm] = useState({ name: '', quantity: 1, categoryId: '', note: '', imageUrl: '', addDate: '', cabinet: '' });
   const [propForm, setPropForm] = useState({ propId: '', name: '', brandModel: '', value: '', acquireDate: '', lifespan: '', user: '', location: '', note: '', status: '未盤點', imageUrl: '' });
   
   const [imagePreview, setImagePreview] = useState(''); 
@@ -867,7 +994,7 @@ export default function App() {
   useEffect(() => {
     if (!user || viewMode !== 'dashboard' || !appMode) return;
     if (sessions.length === 0) {
-        setDashboardStats({ latestSessionId: null, latestSessionName: '尚無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, overdue: [], dueSoon: [] });
+        setDashboardStats({ latestSessionId: null, latestSessionName: '尚無資料', totalItems: 0, totalBorrowedOrInventoried: 0, lowStockOrUninventoried: 0, overdue: [], dueSoon: [], latestItems: [] });
         return;
     }
     const latestSession = sessions[0];
@@ -887,7 +1014,9 @@ export default function App() {
             else countB++;
         }
       });
-      setDashboardStats(prev => ({ ...prev, latestSessionId: targetSessionId, latestSessionName: latestSession.name, totalItems: total, totalBorrowedOrInventoried: countA, lowStockOrUninventoried: countB }));
+      // 🟢 首頁櫃位圖需要最新版次的設備清單（僅實驗室系統會用到）
+      const latestItems = isLab ? snap.docs.map(d => ({ id: d.id, ...d.data() })) : [];
+      setDashboardStats(prev => ({ ...prev, latestSessionId: targetSessionId, latestSessionName: latestSession.name, totalItems: total, totalBorrowedOrInventoried: countA, lowStockOrUninventoried: countB, latestItems }));
     }, onListenerError('概覽統計'));
 
     let unsubLoans = () => {};
@@ -1469,7 +1598,7 @@ export default function App() {
       
       if (isLab) {
         const cat = categories.find(c => c.id === equipForm.categoryId);
-        payload = { ...payload, name: equipForm.name, quantity: parseInt(equipForm.quantity), categoryId: equipForm.categoryId, categoryName: cat ? cat.name : '未分類', note: equipForm.note, addDate: equipForm.addDate || '', ...(editItem ? {} : { borrowedCount: 0 }) };
+        payload = { ...payload, name: equipForm.name, quantity: parseInt(equipForm.quantity), categoryId: equipForm.categoryId, categoryName: cat ? cat.name : '未分類', note: equipForm.note, addDate: equipForm.addDate || '', cabinet: normalizeSlot(equipForm.cabinet), ...(editItem ? {} : { borrowedCount: 0 }) };
       } else {
         payload = { ...payload, ...propForm, tableId: currentTable.id, tableName: currentTable.name, imageUrl: imagePreview || '', ...(editItem ? {} : { createdAt: serverTimestamp() }) };
       }
@@ -1550,6 +1679,19 @@ export default function App() {
 
   const totalPages = Math.ceil(filteredItems.length / pageSize);
   const paginatedItems = useMemo(() => { const startIndex = (currentPage - 1) * pageSize; return filteredItems.slice(startIndex, startIndex + pageSize); }, [filteredItems, currentPage, pageSize]);
+
+  // 🟢 櫃位圖：網格尺寸自動撐大以容納所有已使用的櫃位，不需另設定
+  const cabinetSize = useMemo(() => fitGridSize(itemsList, { cols: DEFAULT_COLS, rows: DEFAULT_ROWS }), [itemsList]);
+  const cabinetGrid = useMemo(() => buildGrid(itemsList, cabinetSize), [itemsList, cabinetSize]);
+  const cabinetCounts = useMemo(() => countByStatus(cabinetGrid), [cabinetGrid]);
+  const cabinetUnassigned = useMemo(() => unassignedItems(itemsList), [itemsList]);
+  const selectedCell = useMemo(() => cabinetGrid.find(c => c.slot === selectedSlot) || null, [cabinetGrid, selectedSlot]);
+
+  // 🟢 首頁概覽的迷你櫃位圖（用最新版次的設備，與櫃位圖頁各自獨立）
+  const homeItems = dashboardStats.latestItems || [];
+  const homeCabinetSize = useMemo(() => fitGridSize(homeItems, { cols: DEFAULT_COLS, rows: DEFAULT_ROWS }), [homeItems]);
+  const homeCabinetGrid = useMemo(() => buildGrid(homeItems, homeCabinetSize), [homeItems, homeCabinetSize]);
+  const homeCabinetCounts = useMemo(() => countByStatus(homeCabinetGrid), [homeCabinetGrid]);
   const totalLoanPages = Math.ceil(loans.length / pageSize);
   const paginatedLoans = useMemo(() => { const startIndex = (currentLoanPage - 1) * pageSize; return loans.slice(startIndex, startIndex + pageSize); }, [loans, currentLoanPage, pageSize]);
 
@@ -1581,7 +1723,7 @@ export default function App() {
       const todayStr = new Date().toISOString().slice(0, 10);
       const minguoStr = getMinguoDateString();
       if (isLab) {
-          setEquipForm(item ? { name: item.name, quantity: item.quantity, categoryId: item.categoryId, note: item.note, imageUrl: item.imageUrl, addDate: item.addDate || '' } : { name: '', quantity: 1, categoryId: categories[0]?.id || '', note: '', imageUrl: '', addDate: todayStr }); 
+          setEquipForm(item ? { name: item.name, quantity: item.quantity, categoryId: item.categoryId, note: item.note, imageUrl: item.imageUrl, addDate: item.addDate || '', cabinet: item.cabinet || '' } : { name: '', quantity: 1, categoryId: categories[0]?.id || '', note: '', imageUrl: '', addDate: todayStr, cabinet: '' });
       } else {
           setPropForm(item ? { propId: item.propId||'', name: item.name||'', brandModel: item.brandModel||'', value: item.value||'', acquireDate: item.acquireDate||'', lifespan: item.lifespan||'', user: item.user||'', location: item.location||'', note: item.note||'', status: item.status||'未盤點', imageUrl: item.imageUrl||'' } : { propId: '', name: '', brandModel: '', value: '', acquireDate: minguoStr, lifespan: '', user: '', location: '', note: '', status: '未盤點', imageUrl: '' });
       }
@@ -2048,6 +2190,7 @@ export default function App() {
                 <>
                 {canEdit && <button onClick={() => { setViewMode('borrow-request'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'borrow-request' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><ShoppingCart className="w-5 h-5" /> 借用登記</button>}
                 <button onClick={() => { setViewMode('loans'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'loans' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><History className="w-5 h-5" /> 借還紀錄表</button>
+                <button onClick={() => { setViewMode('cabinet'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'cabinet' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><Grid3x3 className="w-5 h-5" /> 櫃位圖</button>
                 <button onClick={() => { setViewMode('layout'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'layout' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><Map className="w-5 h-5" /> 實驗室配置圖</button>
                 </>
               )}
@@ -2071,6 +2214,7 @@ export default function App() {
                     {currentSession && viewMode === 'items' && currentSession.name}
                     {currentSession && viewMode === 'borrow-request' && `${currentSession.name} - 借用登記`}
                     {currentSession && viewMode === 'loans' && `${currentSession.name} - 借還紀錄`}
+                    {currentSession && viewMode === 'cabinet' && `${currentSession.name} - 櫃位圖`}
                     {currentSession && viewMode === 'layout' && `${currentSession.name} - 實驗室配置圖`}
                   </h2>
                   {currentSession && viewMode !== 'dashboard' && viewMode !== 'sessions' && viewMode !== 'categories' && (
@@ -2227,6 +2371,42 @@ export default function App() {
                     <StatCard title={isLab ? "低庫存警示" : "尚未盤點"} value={dashboardStats.lowStockOrUninventoried} subtext={isLab ? "庫存低於 3 件" : "待處理項目"} icon={AlertTriangle} colorClass="bg-rose-500" onClick={() => handleStatClick('lowstock')} />
                 </div>
                 
+                {/* 🟢 首頁櫃位圖：一眼看出哪格有貨、哪格見底，點任一格進入櫃位圖頁 */}
+                {isLab && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                        <Grid3x3 className="w-5 h-5 text-teal-600"/> 櫃位總覽
+                      </h3>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        {['ok', 'low', 'out', 'empty'].map(k => (
+                          <span key={k} className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                            <span className={`w-2.5 h-2.5 rounded-full ${SLOT_STYLES[k].dot}`} />
+                            {SLOT_STYLES[k].label} {homeCabinetCounts[k]}
+                          </span>
+                        ))}
+                        <button onClick={() => { const target = sessions.find(s => s.id === dashboardStats.latestSessionId) || sessions[0]; if (target) { setCurrentSession(target); setViewMode('cabinet'); } }} className="text-xs font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1 transition-colors">
+                          開啟櫃位圖 <ChevronRight className="w-3.5 h-3.5"/>
+                        </button>
+                      </div>
+                    </div>
+                    {homeCabinetCounts.all > homeCabinetCounts.empty ? (
+                      <CabinetGrid
+                        grid={homeCabinetGrid}
+                        cols={homeCabinetSize.cols}
+                        compact
+                        onSelect={(cell) => { const target = sessions.find(s => s.id === dashboardStats.latestSessionId) || sessions[0]; if (target) { setCurrentSession(target); setSelectedSlot(cell.slot); setViewMode('cabinet'); } }}
+                      />
+                    ) : (
+                      <div className="text-center py-8 text-slate-400">
+                        <PackageOpen className="w-10 h-10 mx-auto mb-2 opacity-40"/>
+                        <p className="text-sm font-medium">尚未有設備配置櫃位</p>
+                        <p className="text-xs mt-1">編輯設備時填入「櫃位」（例 A1），這裡就會顯示位置圖</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {isLab ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* 🟢 逾期未歸還：由借用日期 + 預計天數推算應歸還日，逾期最久的排最前面 */}
@@ -2592,6 +2772,67 @@ export default function App() {
                     <PaginationControl currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                   </div>
                 </>
+              )}
+            </div>
+          )}
+
+          {/* 🟢 櫃位圖 View（LAB ONLY）：左側抽屜網格 + 右側詳細資訊面板 */}
+          {isLab && viewMode === 'cabinet' && currentSession && (
+            <div className="max-w-7xl mx-auto animate-in fade-in duration-300 space-y-4">
+              {/* 狀態篩選列 */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-3 flex items-center gap-2 overflow-x-auto hide-scrollbar">
+                {[
+                  { key: 'all', label: '全部', count: cabinetCounts.all },
+                  { key: 'ok', label: '有貨', count: cabinetCounts.ok },
+                  { key: 'low', label: '低庫存', count: cabinetCounts.low },
+                  { key: 'out', label: '全借出', count: cabinetCounts.out },
+                  { key: 'empty', label: '空的', count: cabinetCounts.empty },
+                ].map(f => (
+                  <button key={f.key} onClick={() => setSlotFilter(f.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border whitespace-nowrap transition-colors flex items-center gap-1.5 ${slotFilter === f.key ? 'bg-teal-600 border-teal-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:border-teal-300'}`}>
+                    {f.key !== 'all' && <span className={`w-2 h-2 rounded-full ${SLOT_STYLES[f.key].dot}`} />}
+                    {f.label} ({f.count})
+                  </button>
+                ))}
+                <span className="ml-auto text-xs text-slate-400 whitespace-nowrap pl-2">
+                  {cabinetSize.cols} 欄 × {cabinetSize.rows} 列
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+                {/* 網格 */}
+                <div className="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+                  <CabinetGrid grid={cabinetGrid} cols={cabinetSize.cols} selectedSlot={selectedSlot} onSelect={(cell) => setSelectedSlot(cell.slot)} statusFilter={slotFilter} />
+                </div>
+
+                {/* 詳細面板 */}
+                <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 min-h-[300px]">
+                  <CabinetDetail
+                    cell={selectedCell}
+                    categories={categories}
+                    canEdit={canEdit}
+                    onEdit={openItemModal}
+                    onBorrow={initiateAddToCart}
+                    onImageClick={setFullScreenImage}
+                    fallbackImage={FALLBACK_IMAGE_SRC}
+                  />
+                </div>
+              </div>
+
+              {/* 未配置櫃位的設備提醒 */}
+              {cabinetUnassigned.length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+                  <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2 mb-3">
+                    <AlertCircle className="w-4 h-4 text-amber-500"/> 尚未配置櫃位的設備（{cabinetUnassigned.length}）
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {cabinetUnassigned.map(item => (
+                      <button key={item.id} onClick={() => canEdit && openItemModal(item)} className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 ${canEdit ? 'hover:border-teal-400 hover:text-teal-700 transition-colors' : 'cursor-default'}`}>
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
+                  {canEdit && <p className="text-xs text-slate-400 mt-2.5">點設備即可編輯並填入櫃位</p>}
+                </div>
               )}
             </div>
           )}
@@ -2974,6 +3215,12 @@ export default function App() {
                       <div><label className="text-sm font-bold text-slate-700 mb-1 block">分類</label><select className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none bg-white text-sm" value={equipForm.categoryId} onChange={e=>setEquipForm({...equipForm, categoryId:e.target.value})} required><option value="" disabled>選擇分類</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                     </div>
                     <div><label className="text-sm font-bold text-slate-700 mb-1 block">加入日期 (非必填)</label><input type="date" className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none bg-white text-sm" value={equipForm.addDate} onChange={e=>setEquipForm({...equipForm, addDate:e.target.value})}/></div>
+                    {/* 🟢 櫃位：對應櫃位圖上的格子 */}
+                    <div>
+                      <label className="text-sm font-bold text-slate-700 mb-1 block">櫃位 (非必填)</label>
+                      <input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none text-sm uppercase" value={equipForm.cabinet} onChange={e=>setEquipForm({...equipForm, cabinet:e.target.value})} placeholder="例如 A1、C7"/>
+                      <p className="text-xs text-slate-400 mt-1">格式為「欄字母 + 列數字」，填了才會顯示在櫃位圖上{equipForm.cabinet && !normalizeSlot(equipForm.cabinet) && <span className="text-rose-500 font-bold">（目前格式無效，將視為未配置）</span>}</p>
+                    </div>
                     <div><label className="text-sm font-bold text-slate-700 mb-1 block">備註</label><input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none text-sm" value={equipForm.note} onChange={e=>setEquipForm({...equipForm, note:e.target.value})}/></div>
                     </>
                 ) : (
