@@ -744,6 +744,9 @@ export default function App() {
   // 🟢 櫃位圖 State
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [slotFilter, setSlotFilter] = useState('all');
+  // 🟢 首頁櫃位圖：桌機直接在首頁展開詳細，手機（無空間並排）改為跳到櫃位圖頁
+  const [homeSelectedSlot, setHomeSelectedSlot] = useState(null);
+  const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
   
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState([]);
@@ -1687,11 +1690,32 @@ export default function App() {
   const cabinetUnassigned = useMemo(() => unassignedItems(itemsList), [itemsList]);
   const selectedCell = useMemo(() => cabinetGrid.find(c => c.slot === selectedSlot) || null, [cabinetGrid, selectedSlot]);
 
-  // 🟢 首頁概覽的迷你櫃位圖（用最新版次的設備，與櫃位圖頁各自獨立）
+  // 🟢 追蹤是否為桌機寬度（首頁櫃位點擊行為依此切換）
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = (e) => setIsDesktop(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // 🟢 首頁概覽的櫃位圖（用最新版次的設備，與櫃位圖頁各自獨立）
   const homeItems = dashboardStats.latestItems || [];
   const homeCabinetSize = useMemo(() => fitGridSize(homeItems, { cols: DEFAULT_COLS, rows: DEFAULT_ROWS }), [homeItems]);
   const homeCabinetGrid = useMemo(() => buildGrid(homeItems, homeCabinetSize), [homeItems, homeCabinetSize]);
   const homeCabinetCounts = useMemo(() => countByStatus(homeCabinetGrid), [homeCabinetGrid]);
+  const homeSelectedCell = useMemo(() => homeCabinetGrid.find(c => c.slot === homeSelectedSlot) || null, [homeCabinetGrid, homeSelectedSlot]);
+
+  // 首頁點櫃位：桌機就地展開，手機跳到櫃位圖頁並選中該格
+  const handleHomeSlotClick = (cell) => {
+    if (isDesktop) { setHomeSelectedSlot(prev => (prev === cell.slot ? null : cell.slot)); return; }
+    const target = sessions.find(s => s.id === dashboardStats.latestSessionId) || sessions[0];
+    if (target) { setCurrentSession(target); setSelectedSlot(cell.slot); setViewMode('cabinet'); }
+  };
+
+  const goToCabinetView = () => {
+    const target = sessions.find(s => s.id === dashboardStats.latestSessionId) || sessions[0];
+    if (target) { setCurrentSession(target); setViewMode('cabinet'); }
+  };
   const totalLoanPages = Math.ceil(loans.length / pageSize);
   const paginatedLoans = useMemo(() => { const startIndex = (currentLoanPage - 1) * pageSize; return loans.slice(startIndex, startIndex + pageSize); }, [loans, currentLoanPage, pageSize]);
 
@@ -2081,6 +2105,16 @@ export default function App() {
 
   const SysConfig = SYSTEM_CONFIGS.find(s => s.id === appMode) || SYSTEM_CONFIGS[0];
 
+  // 🟢 首頁四張統計卡（實驗室版排在櫃位圖右側，其他系統維持橫向四欄）
+  const statCards = (
+    <>
+      <StatCard title={isLab ? "管理中版次總數" : "歷史清單總數"} value={sessions.length} icon={FolderOpen} colorClass="bg-slate-700" onClick={() =>setViewMode('sessions')} />
+      <StatCard title={isLab ? "最新版次設備種類" : "清單財產總筆數"} value={dashboardStats.totalItems} icon={Box} colorClass={SysConfig.colorClass} onClick={() => handleStatClick('items')} />
+      <StatCard title={isLab ? "目前外借中" : "已完成盤點"} value={dashboardStats.totalBorrowedOrInventoried} icon={Activity} colorClass={isLab ? "bg-orange-500" : "bg-emerald-500"} onClick={() => handleStatClick('borrowed')} />
+      <StatCard title={isLab ? "低庫存警示" : "尚未盤點"} value={dashboardStats.lowStockOrUninventoried} subtext={isLab ? "庫存低於 3 件" : "待處理項目"} icon={AlertTriangle} colorClass="bg-rose-500" onClick={() => handleStatClick('lowstock')} />
+    </>
+  );
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row text-slate-800 font-sans">
       <ConfirmModal isOpen={confirmDialog.isOpen} title={confirmDialog.title} message={confirmDialog.message} onConfirm={confirmDialog.action} onCancel={()=>setConfirmDialog(p=>({...p, isOpen:false}))} isDangerous={confirmDialog.isDangerous} />
@@ -2364,46 +2398,73 @@ export default function App() {
           {/* Dashboard View */}
           {viewMode === 'dashboard' && (
              <div className="space-y-6 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <StatCard title={isLab ? "管理中版次總數" : "歷史清單總數"} value={sessions.length} icon={FolderOpen} colorClass="bg-slate-700" onClick={() =>setViewMode('sessions')} />
-                    <StatCard title={isLab ? "最新版次設備種類" : "清單財產總筆數"} value={dashboardStats.totalItems} icon={Box} colorClass={SysConfig.colorClass} onClick={() => handleStatClick('items')} />
-                    <StatCard title={isLab ? "目前外借中" : "已完成盤點"} value={dashboardStats.totalBorrowedOrInventoried} icon={Activity} colorClass={isLab ? "bg-orange-500" : "bg-emerald-500"} onClick={() => handleStatClick('borrowed')} />
-                    <StatCard title={isLab ? "低庫存警示" : "尚未盤點"} value={dashboardStats.lowStockOrUninventoried} subtext={isLab ? "庫存低於 3 件" : "待處理項目"} icon={AlertTriangle} colorClass="bg-rose-500" onClick={() => handleStatClick('lowstock')} />
-                </div>
-                
-                {/* 🟢 首頁櫃位圖：一眼看出哪格有貨、哪格見底，點任一格進入櫃位圖頁 */}
-                {isLab && (
-                  <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                      <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                        <Grid3x3 className="w-5 h-5 text-teal-600"/> 櫃位總覽
-                      </h3>
-                      <div className="flex items-center gap-3 flex-wrap">
-                        {['ok', 'low', 'out', 'empty'].map(k => (
-                          <span key={k} className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
-                            <span className={`w-2.5 h-2.5 rounded-full ${SLOT_STYLES[k].dot}`} />
-                            {SLOT_STYLES[k].label} {homeCabinetCounts[k]}
-                          </span>
-                        ))}
-                        <button onClick={() => { const target = sessions.find(s => s.id === dashboardStats.latestSessionId) || sessions[0]; if (target) { setCurrentSession(target); setViewMode('cabinet'); } }} className="text-xs font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1 transition-colors">
-                          開啟櫃位圖 <ChevronRight className="w-3.5 h-3.5"/>
-                        </button>
+                {/* 🟢 實驗室：左邊櫃位大圖、右邊統計卡；點格子在桌機就地展開，手機則跳到櫃位圖 */}
+                {isLab ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                    <div className="lg:col-span-2 order-2 lg:order-1 bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                        <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                          <Grid3x3 className="w-5 h-5 text-teal-600"/> 櫃位總覽
+                        </h3>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          {['ok', 'low', 'out', 'empty'].map(k => (
+                            <span key={k} className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                              <span className={`w-2.5 h-2.5 rounded-full ${SLOT_STYLES[k].dot}`} />
+                              {SLOT_STYLES[k].label} {homeCabinetCounts[k]}
+                            </span>
+                          ))}
+                          <button onClick={goToCabinetView} className="text-xs font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1 transition-colors">
+                            開啟櫃位圖 <ChevronRight className="w-3.5 h-3.5"/>
+                          </button>
+                        </div>
                       </div>
+
+                      {homeCabinetCounts.all > homeCabinetCounts.empty ? (
+                        <>
+                          <CabinetGrid
+                            grid={homeCabinetGrid}
+                            cols={homeCabinetSize.cols}
+                            selectedSlot={homeSelectedSlot}
+                            onSelect={handleHomeSlotClick}
+                          />
+                          {/* 桌機點格子後就地展開詳細（再點同一格收合） */}
+                          {homeSelectedCell && (
+                            <div className="mt-4 border-t border-slate-100 pt-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                              <div className="flex justify-end">
+                                <button onClick={() => setHomeSelectedSlot(null)} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 px-2 py-1 transition-colors">
+                                  <X className="w-3.5 h-3.5"/> 收合
+                                </button>
+                              </div>
+                              <div className="bg-slate-50/70 rounded-xl border border-slate-100">
+                                <CabinetDetail
+                                  cell={homeSelectedCell}
+                                  categories={categories}
+                                  canEdit={false}
+                                  onEdit={() => {}}
+                                  onBorrow={() => {}}
+                                  onImageClick={setFullScreenImage}
+                                  fallbackImage={FALLBACK_IMAGE_SRC}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-center py-8 text-slate-400">
+                          <PackageOpen className="w-10 h-10 mx-auto mb-2 opacity-40"/>
+                          <p className="text-sm font-medium">尚未有設備配置櫃位</p>
+                          <p className="text-xs mt-1">編輯設備時填入「櫃位」（例 A1），這裡就會顯示位置圖</p>
+                        </div>
+                      )}
                     </div>
-                    {homeCabinetCounts.all > homeCabinetCounts.empty ? (
-                      <CabinetGrid
-                        grid={homeCabinetGrid}
-                        cols={homeCabinetSize.cols}
-                        compact
-                        onSelect={(cell) => { const target = sessions.find(s => s.id === dashboardStats.latestSessionId) || sessions[0]; if (target) { setCurrentSession(target); setSelectedSlot(cell.slot); setViewMode('cabinet'); } }}
-                      />
-                    ) : (
-                      <div className="text-center py-8 text-slate-400">
-                        <PackageOpen className="w-10 h-10 mx-auto mb-2 opacity-40"/>
-                        <p className="text-sm font-medium">尚未有設備配置櫃位</p>
-                        <p className="text-xs mt-1">編輯設備時填入「櫃位」（例 A1），這裡就會顯示位置圖</p>
-                      </div>
-                    )}
+
+                    <div className="order-1 lg:order-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
+                      {statCards}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {statCards}
                   </div>
                 )}
 
