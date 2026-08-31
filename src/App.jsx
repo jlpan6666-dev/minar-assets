@@ -1693,7 +1693,10 @@ export default function App() {
   // 🟢 追蹤是否為桌機寬度（首頁櫃位點擊行為依此切換）
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
-    const onChange = (e) => setIsDesktop(e.matches);
+    const onChange = (e) => {
+      setIsDesktop(e.matches);
+      if (!e.matches) setHomeSelectedSlot(null); // 縮到手機寬度時收合，避免內容跑到櫃位圖上方
+    };
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
@@ -2420,35 +2423,12 @@ export default function App() {
                       </div>
 
                       {homeCabinetCounts.all > homeCabinetCounts.empty ? (
-                        <>
-                          <CabinetGrid
-                            grid={homeCabinetGrid}
-                            cols={homeCabinetSize.cols}
-                            selectedSlot={homeSelectedSlot}
-                            onSelect={handleHomeSlotClick}
-                          />
-                          {/* 桌機點格子後就地展開詳細（再點同一格收合） */}
-                          {homeSelectedCell && (
-                            <div className="mt-4 border-t border-slate-100 pt-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                              <div className="flex justify-end">
-                                <button onClick={() => setHomeSelectedSlot(null)} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 px-2 py-1 transition-colors">
-                                  <X className="w-3.5 h-3.5"/> 收合
-                                </button>
-                              </div>
-                              <div className="bg-slate-50/70 rounded-xl border border-slate-100">
-                                <CabinetDetail
-                                  cell={homeSelectedCell}
-                                  categories={categories}
-                                  canEdit={false}
-                                  onEdit={() => {}}
-                                  onBorrow={() => {}}
-                                  onImageClick={setFullScreenImage}
-                                  fallbackImage={FALLBACK_IMAGE_SRC}
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </>
+                        <CabinetGrid
+                          grid={homeCabinetGrid}
+                          cols={homeCabinetSize.cols}
+                          selectedSlot={homeSelectedSlot}
+                          onSelect={handleHomeSlotClick}
+                        />
                       ) : (
                         <div className="text-center py-8 text-slate-400">
                           <PackageOpen className="w-10 h-10 mx-auto mb-2 opacity-40"/>
@@ -2458,8 +2438,33 @@ export default function App() {
                       )}
                     </div>
 
-                    <div className="order-1 lg:order-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
-                      {statCards}
+                    {/* 右欄：統計卡 + 點櫃位後的內容（填滿統計卡下方的空白） */}
+                    <div className="order-1 lg:order-2 space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
+                        {statCards}
+                      </div>
+
+                      {homeSelectedCell && (
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 animate-in fade-in slide-in-from-top-2 duration-200">
+                          <div className="flex items-center justify-between px-4 pt-3">
+                            <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+                              <Grid3x3 className="w-3.5 h-3.5"/> 櫃位內容
+                            </span>
+                            <button onClick={() => setHomeSelectedSlot(null)} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 px-1 py-1 transition-colors">
+                              <X className="w-3.5 h-3.5"/> 收合
+                            </button>
+                          </div>
+                          <CabinetDetail
+                            cell={homeSelectedCell}
+                            categories={categories}
+                            canEdit={false}
+                            onEdit={() => {}}
+                            onBorrow={() => {}}
+                            onImageClick={setFullScreenImage}
+                            fallbackImage={FALLBACK_IMAGE_SRC}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
