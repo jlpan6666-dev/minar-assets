@@ -894,8 +894,8 @@ export default function App() {
 
   // Reset Filters, Selection & Navigation on Mode Change
   useEffect(() => {
-    // 🟢 進入系統直接落在清單／版次總覽（首頁概覽仍可從側邊欄或底部導覽進入）
-    setViewMode('sessions');
+    // 🟢 進入系統直接落在首頁概覽（不預先開啟任何版次；概覽本身統計的是最新版次）
+    setViewMode('dashboard');
     setCurrentSession(null);
     setCurrentTable(null);
     setSearchTerm(''); setSearchDate(''); setSearchStatus('all'); setSelectedCategoryFilter('all');
