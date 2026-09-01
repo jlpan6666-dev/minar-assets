@@ -337,39 +337,46 @@ const SLOT_STYLES = {
   out:   { cell: 'bg-rose-50 border-rose-300 text-rose-800 hover:border-rose-500', dot: 'bg-rose-500', label: '全借出' },
 };
 
-// --- 元件：櫃位地圖（可點擊的抽屜網格；compact 為首頁用的迷你版） ---
-const CabinetGrid = ({ grid, cols, selectedSlot, onSelect, compact = false, statusFilter = 'all' }) => (
+// --- 元件：櫃位地圖（可點擊的抽屜網格） ---
+// 有設備的格子顯示「櫃位碼 + 設備名稱 + 可借/總數」，名稱過長會截斷（完整名稱在 title 提示與右側面板）
+const CabinetGrid = ({ grid, cols, selectedSlot, onSelect, statusFilter = 'all' }) => (
   <div className="overflow-x-auto">
-    {/* compact（首頁迷你版）限寬，避免寬螢幕上格子被拉得又寬又扁 */}
-    <div className={compact ? 'w-full max-w-2xl' : 'inline-block min-w-full'}>
+    <div className="inline-block min-w-full">
       {/* 欄標題 A B C… */}
-      <div className="grid gap-1 mb-1" style={{ gridTemplateColumns: `${compact ? '1.25rem' : '1.75rem'} repeat(${cols}, minmax(0, 1fr))` }}>
+      <div className="grid gap-1 mb-1" style={{ gridTemplateColumns: `1.75rem repeat(${cols}, minmax(3.25rem, 1fr))` }}>
         <div />
         {Array.from({ length: cols }, (_, c) => (
-          <div key={c} className={`text-center font-bold text-slate-400 ${compact ? 'text-[9px]' : 'text-xs'}`}>{colLetter(c)}</div>
+          <div key={c} className="text-center font-bold text-slate-400 text-xs">{colLetter(c)}</div>
         ))}
       </div>
       {/* 每一列：列號 + 格子 */}
       {Array.from(new Set(grid.map(g => g.row))).map(row => (
-        <div key={row} className="grid gap-1 mb-1" style={{ gridTemplateColumns: `${compact ? '1.25rem' : '1.75rem'} repeat(${cols}, minmax(0, 1fr))` }}>
-          <div className={`flex items-center justify-center font-bold text-slate-400 ${compact ? 'text-[9px]' : 'text-xs'}`}>{row}</div>
+        <div key={row} className="grid gap-1 mb-1" style={{ gridTemplateColumns: `1.75rem repeat(${cols}, minmax(3.25rem, 1fr))` }}>
+          <div className="flex items-center justify-center font-bold text-slate-400 text-xs">{row}</div>
           {grid.filter(g => g.row === row).map(cell => {
             const style = SLOT_STYLES[cell.status];
             const dimmed = statusFilter !== 'all' && cell.status !== statusFilter;
             const selected = selectedSlot === cell.slot;
+            const extra = cell.items.length - 1;
             return (
               <button
                 key={cell.slot}
                 onClick={() => onSelect && onSelect(cell)}
-                title={`${cell.slot}｜${style.label}${cell.items.length ? `｜${cell.items.map(i => i.name).join('、')}` : ''}`}
-                className={`border-2 rounded-md transition-all flex flex-col items-center justify-center leading-none
-                  ${compact ? 'h-5 text-[8px] rounded' : 'h-12 md:h-14 text-[10px] md:text-xs active:scale-95'}
+                title={`${cell.slot}｜${style.label}${cell.items.length ? `｜${cell.items.map(i => `${i.name} (剩 ${Math.max(0, (i.quantity || 0) - (i.borrowedCount || 0))})`).join('、')}` : ''}`}
+                className={`border-2 rounded-md transition-all flex flex-col items-center justify-center px-0.5 h-14 md:h-16 active:scale-95
                   ${style.cell} ${dimmed ? 'opacity-25' : ''}
                   ${selected ? 'ring-2 ring-teal-500 ring-offset-1 border-teal-500 shadow-md' : ''}`}
               >
-                <span className="font-bold">{cell.slot}</span>
-                {!compact && cell.items.length > 0 && (
-                  <span className="mt-0.5 font-mono opacity-80">{cell.available}/{cell.total}</span>
+                {cell.items.length === 0 ? (
+                  <span className="font-bold text-[10px] md:text-xs opacity-70">{cell.slot}</span>
+                ) : (
+                  <>
+                    <span className="font-bold text-[9px] leading-none opacity-60">{cell.slot}</span>
+                    <span className="w-full truncate font-bold text-[10px] md:text-[11px] leading-tight my-0.5">{cell.items[0].name}</span>
+                    <span className="font-mono text-[9px] leading-none opacity-80">
+                      {cell.available}/{cell.total}{extra > 0 && <span className="ml-0.5 font-sans">+{extra}</span>}
+                    </span>
+                  </>
                 )}
               </button>
             );
