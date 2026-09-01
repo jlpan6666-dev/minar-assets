@@ -9,9 +9,10 @@ export const PERF_SHEET_ID = '16d-1IZ9ZYU4V0oqfEXI9PWFqZoHMXBOAo7kScCcfzhA';
 export const PERF_SHEET_EDIT_URL = `https://docs.google.com/spreadsheets/d/${PERF_SHEET_ID}/edit`;
 export const PERF_SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${PERF_SHEET_ID}/gviz/tq?tqx=out:csv`;
 
-// 🟢 部署 apps-script/performance-api.gs 後，把「網頁應用程式網址」貼在這裡
+// 🟢 apps-script/performance-api.gs 的部署網址
 // 留空時：頁面仍可正常顯示（讀公開 CSV），但不提供編輯功能
-export const PERF_API_URL = '';
+// 註：Apps Script 每次「新增部署作業」都會產生新網址，重新部署後需同步更新這裡
+export const PERF_API_URL = 'https://script.google.com/macros/s/AKfycbysK4jvbblqoYtVorHnxd-MmpmK3FdHF01V_lcUOf8EjqS50zHfC3HRV9v_vgjrzvm-Xg/exec';
 
 export const isApiConfigured = () => PERF_API_URL.startsWith('https://');
 
