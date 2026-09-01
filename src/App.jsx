@@ -387,6 +387,67 @@ const CabinetGrid = ({ grid, cols, selectedSlot, onSelect, statusFilter = 'all' 
   </div>
 );
 
+// --- 元件：櫃位選擇彈窗（縮小版櫃位圖；已有其他設備的格子反灰不可選） ---
+const SlotPickerModal = ({ isOpen, onClose, grid, cols, currentSlot, editItemId, onPick }) => {
+  if (!isOpen) return null;
+  const rows = Array.from(new Set(grid.map(g => g.row)));
+  const template = `1.5rem repeat(${cols}, minmax(2.25rem, 1fr))`;
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-1">
+          <h3 className="text-lg font-bold text-teal-700 flex items-center gap-2"><Grid3x3 className="w-5 h-5"/> 選擇櫃位</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5"/></button>
+        </div>
+        <p className="text-xs text-slate-400 mb-4">灰色代表已有其他設備，無法選取；點空白格即可指定位置</p>
+
+        <div className="overflow-x-auto">
+          <div className="inline-block min-w-full">
+            <div className="grid gap-1 mb-1" style={{ gridTemplateColumns: template }}>
+              <div />
+              {Array.from({ length: cols }, (_, c) => (
+                <div key={c} className="text-center font-bold text-slate-400 text-[10px]">{colLetter(c)}</div>
+              ))}
+            </div>
+            {rows.map(row => (
+              <div key={row} className="grid gap-1 mb-1" style={{ gridTemplateColumns: template }}>
+                <div className="flex items-center justify-center font-bold text-slate-400 text-[10px]">{row}</div>
+                {grid.filter(g => g.row === row).map(cell => {
+                  const others = cell.items.filter(i => i.id !== editItemId);
+                  const taken = others.length > 0;
+                  const selected = cell.slot === currentSlot;
+                  return (
+                    <button
+                      key={cell.slot}
+                      type="button"
+                      disabled={taken}
+                      onClick={() => { onPick(cell.slot); onClose(); }}
+                      title={taken ? `${cell.slot}｜已有：${others.map(i => i.name).join('、')}` : `${cell.slot}｜空位`}
+                      className={`h-9 rounded border-2 text-[10px] font-bold transition-all
+                        ${taken
+                          ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                          : 'bg-white border-slate-200 text-slate-500 hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700 active:scale-95'}
+                        ${selected ? 'ring-2 ring-teal-500 ring-offset-1 border-teal-500 bg-teal-50 text-teal-700' : ''}`}
+                    >
+                      {cell.slot}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-3 mt-5 pt-4 border-t border-slate-100">
+          <button type="button" onClick={() => { onPick(''); onClose(); }} className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors">清除櫃位</button>
+          <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 bg-slate-700 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors">關閉</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- 元件：櫃位詳細資訊面板（點格子後顯示該格設備） ---
 const CabinetDetail = ({ cell, categories, canEdit, onEdit, onBorrow, onImageClick, fallbackImage }) => {
   if (!cell) return (
@@ -753,6 +814,7 @@ export default function App() {
   const [slotFilter, setSlotFilter] = useState('all');
   // 🟢 首頁櫃位圖：桌機直接在首頁展開詳細，手機（無空間並排）改為跳到櫃位圖頁
   const [homeSelectedSlot, setHomeSelectedSlot] = useState(null);
+  const [isSlotPickerOpen, setIsSlotPickerOpen] = useState(false); // 設備表單的櫃位選擇彈窗
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
   
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -1694,22 +1756,11 @@ export default function App() {
   const cabinetSize = useMemo(() => fitGridSize(itemsList, { cols: DEFAULT_COLS, rows: DEFAULT_ROWS }), [itemsList]);
   const cabinetGrid = useMemo(() => buildGrid(itemsList, cabinetSize), [itemsList, cabinetSize]);
 
-  // 🟢 設備表單的櫃位下拉選單：空位優先，已有設備的櫃位另外分組（仍可選，允許同格放多樣設備）
-  const slotOptions = useMemo(() => {
-    const currentSlot = normalizeSlot(equipForm.cabinet);
-    const empty = [];
-    const occupied = [];
-    cabinetGrid.forEach(cell => {
-      // 編輯中的設備自己佔的格子，視同它的目前位置
-      const othersHere = cell.items.filter(i => i.id !== editItem?.id);
-      if (othersHere.length === 0) empty.push({ slot: cell.slot, label: cell.slot });
-      else occupied.push({ slot: cell.slot, label: `${cell.slot}｜${othersHere[0].name}${othersHere.length > 1 ? ` +${othersHere.length - 1}` : ''}` });
-    });
-    // 目前值若超出網格範圍（例如手動改過資料），仍要能顯示出來
-    const known = new Set([...empty, ...occupied].map(o => o.slot));
-    if (currentSlot && !known.has(currentSlot)) empty.unshift({ slot: currentSlot, label: currentSlot });
-    return { empty, occupied };
-  }, [cabinetGrid, editItem, equipForm.cabinet]);
+  // 🟢 設備表單的可選空位數（供按鈕上顯示還剩幾格）
+  const freeSlotCount = useMemo(
+    () => cabinetGrid.filter(cell => cell.items.every(i => i.id === editItem?.id)).length,
+    [cabinetGrid, editItem]
+  );
   const cabinetCounts = useMemo(() => countByStatus(cabinetGrid), [cabinetGrid]);
   const cabinetUnassigned = useMemo(() => unassignedItems(itemsList), [itemsList]);
   const selectedCell = useMemo(() => cabinetGrid.find(c => c.slot === selectedSlot) || null, [cabinetGrid, selectedSlot]);
@@ -2230,6 +2281,17 @@ export default function App() {
 
       {/* 🟢 實驗室成員管理 Modal（僅教師帳號） */}
       <MemberModal isOpen={isMemberModalOpen && isAdmin} onClose={() => setIsMemberModalOpen(false)} members={members} onAdd={handleAddMember} onUpdate={handleUpdateMember} onRemove={handleRemoveMember} />
+
+      {/* 🟢 設備表單的櫃位選擇彈窗（縮小版櫃位圖，已被佔用的格子反灰） */}
+      <SlotPickerModal
+        isOpen={isSlotPickerOpen}
+        onClose={() => setIsSlotPickerOpen(false)}
+        grid={cabinetGrid}
+        cols={cabinetSize.cols}
+        currentSlot={normalizeSlot(equipForm.cabinet)}
+        editItemId={editItem?.id}
+        onPick={(slot) => setEquipForm(prev => ({ ...prev, cabinet: slot }))}
+      />
 
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 w-64 bg-slate-900 text-slate-100 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 flex flex-col shadow-2xl`}>
@@ -3308,20 +3370,20 @@ export default function App() {
                     {/* 🟢 櫃位：對應櫃位圖上的格子 */}
                     <div>
                       <label className="text-sm font-bold text-slate-700 mb-1 block">櫃位 (非必填)</label>
-                      <select className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none bg-white text-sm" value={normalizeSlot(equipForm.cabinet)} onChange={e=>setEquipForm({...equipForm, cabinet:e.target.value})}>
-                        <option value="">未配置櫃位</option>
-                        {slotOptions.empty.length > 0 && (
-                          <optgroup label={`空位（${slotOptions.empty.length}）`}>
-                            {slotOptions.empty.map(o => <option key={o.slot} value={o.slot}>{o.label}</option>)}
-                          </optgroup>
+                      <button type="button" onClick={() => setIsSlotPickerOpen(true)} className="w-full border border-slate-200 rounded-lg p-2.5 bg-white text-sm flex items-center justify-between gap-2 hover:border-teal-500 transition-colors group">
+                        {normalizeSlot(equipForm.cabinet) ? (
+                          <span className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded-md bg-teal-50 border border-teal-300 text-teal-700 font-bold">{normalizeSlot(equipForm.cabinet)}</span>
+                            <span className="text-slate-400 text-xs">已選擇</span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">尚未指定櫃位</span>
                         )}
-                        {slotOptions.occupied.length > 0 && (
-                          <optgroup label={`已有設備（${slotOptions.occupied.length}）`}>
-                            {slotOptions.occupied.map(o => <option key={o.slot} value={o.slot}>{o.label}</option>)}
-                          </optgroup>
-                        )}
-                      </select>
-                      <p className="text-xs text-slate-400 mt-1">選「空位」即可；選已有設備的櫃位代表同格放多樣設備</p>
+                        <span className="text-teal-600 font-bold text-xs flex items-center gap-1 group-hover:gap-1.5 transition-all">
+                          <Grid3x3 className="w-4 h-4"/> 從櫃位圖選擇
+                        </span>
+                      </button>
+                      <p className="text-xs text-slate-400 mt-1">點按開啟櫃位圖，目前還有 {freeSlotCount} 個空位可選</p>
                     </div>
                     <div><label className="text-sm font-bold text-slate-700 mb-1 block">備註</label><input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none text-sm" value={equipForm.note} onChange={e=>setEquipForm({...equipForm, note:e.target.value})}/></div>
                     </>
