@@ -42,7 +42,7 @@ import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } f
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
-import { PERF_SHEET_CSV_URL, PERF_SHEET_EDIT_URL, PERF_API_URL, isApiConfigured, callPerfApi, parsePerfRows, filterPerfRows, nextSeq } from './performance';
+import { perfCsvUrl, PERF_SHEET_EDIT_URL, isApiConfigured, callPerfApi, parseSheetTable, filterSheetRows, nextRowNumber, groupSheetNames, mainCellIndex } from './performance';
 import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
@@ -395,32 +395,37 @@ const CabinetGrid = ({ grid, cols, selectedSlot, onSelect, statusFilter = 'all' 
 );
 
 // --- 頁面：龔老師績效（顯示走公開 CSV；編輯需該試算表的 Google 編輯權限） ---
+// --- 頁面：龔老師成果績效（25 張工作表，各自欄位原樣呈現；編輯權依試算表共用設定） ---
 const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) => {
-  const [rows, setRows] = useState([]);
+  const [sheetNames, setSheetNames] = useState([]);
+  const [activeSheet, setActiveSheet] = useState('');
+  const [table, setTable] = useState({ headers: [], rows: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
 
   // 能否編輯由 Apps Script 依「試算表共用設定」判定，使用者不需任何額外授權
   const [canEdit, setCanEdit] = useState(false);
+  const [needsUpgrade, setNeedsUpgrade] = useState(false); // Apps Script 還是舊版（沒回傳工作表清單）
 
-  // 編輯中的項目：{ rowNumber: null 代表新增 }
-  const [editing, setEditing] = useState(null);
+  const [editing, setEditing] = useState(null); // { rowNumber: null 代表新增, cells: [] }
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (sheetName) => {
     setLoading(true); setError('');
     try {
       if (isApiConfigured()) {
         const idToken = await user.getIdToken();
-        const data = await callPerfApi({ action: 'list', idToken });
-        setRows(parsePerfRows(data.values));
+        const data = await callPerfApi({ action: 'list', idToken, sheet: sheetName || undefined });
         setCanEdit(!!data.canEdit);
+        setNeedsUpgrade(!Array.isArray(data.sheets));
+        if (Array.isArray(data.sheets)) setSheetNames(data.sheets);
+        if (data.sheet) setActiveSheet(data.sheet);
+        setTable(parseSheetTable(data.values));
       } else {
-        // 尚未部署 Apps Script：退回公開 CSV 唯讀顯示
-        const res = await fetch(`${PERF_SHEET_CSV_URL}&_=${Date.now()}`);
+        const res = await fetch(`${perfCsvUrl(sheetName)}&_=${Date.now()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setRows(parsePerfRows(parseCsvText(await res.text())));
+        setTable(parseSheetTable(parseCsvText(await res.text())));
         setCanEdit(false);
       }
     } catch (e) {
@@ -431,23 +436,21 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
 
   useEffect(() => { load(); }, [load]);
 
+  const switchSheet = (name) => { setActiveSheet(name); setSearch(''); load(name); };
+
   const save = async (e) => {
     e.preventDefault();
     if (!editing) return;
-    const content = editing.content.trim();
-    if (!content) { showToast('內容不可空白', 'error'); return; }
+    if (!editing.cells.join('').trim()) { showToast('內容不可全部空白', 'error'); return; }
     setSaving(true);
     try {
       const idToken = await user.getIdToken();
       const data = await callPerfApi({
-        action: 'save',
-        idToken,
-        rowNumber: editing.rowNumber || null,
-        seq: editing.seq,
-        content,
+        action: 'save', idToken, sheet: activeSheet,
+        rowNumber: editing.rowNumber || null, values: editing.cells,
       });
-      setRows(parsePerfRows(data.values)); // 直接用回傳的最新內容，省一次往返
-      showToast(editing.rowNumber ? '已更新' : '已新增一筆績效');
+      setTable(parseSheetTable(data.values)); // 用回傳的最新內容，省一次往返
+      showToast(editing.rowNumber ? '已更新' : '已新增一筆');
       setEditing(null);
     } catch (err) {
       console.error(err);
@@ -455,35 +458,60 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
     } finally { setSaving(false); }
   };
 
-  const visible = filterPerfRows(rows, search);
+  const visible = filterSheetRows(table.rows, search);
+  const groups = groupSheetNames(sheetNames);
+  const colCount = table.headers.length || 1;
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
-        <div className="max-w-5xl mx-auto px-4 md:px-6 py-4 flex items-center justify-between gap-3">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <button onClick={onBack} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors flex-shrink-0" title="返回系統入口"><ChevronLeft className="w-5 h-5"/></button>
             <div className="min-w-0">
-              <h1 className="text-lg md:text-xl font-bold text-slate-800 truncate">龔老師研究計畫績效</h1>
-              <p className="text-xs text-slate-400">共 {rows.length} 筆{canEdit && ' · 可編輯'}</p>
+              <h1 className="text-lg md:text-xl font-bold text-slate-800 truncate">龔老師成果績效</h1>
+              <p className="text-xs text-slate-400 truncate">{sheetNames.length ? `${sheetNames.length} 個項目` : '載入中'}{table.rows.length ? ` · 本項 ${table.rows.length} 筆` : ''}{canEdit && ' · 可編輯'}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            {canEdit && (
-              <button onClick={() => setEditing({ rowNumber: null, seq: nextSeq(rows), content: '' })} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-sm text-sm font-bold transition-colors">
-                <Plus className="w-4 h-4"/> <span className="hidden sm:inline">新增績效</span>
+            {canEdit && activeSheet && (
+              <button onClick={() => setEditing({ rowNumber: null, cells: Array.from({ length: colCount }, (_, i) => i === 0 ? nextRowNumber(table.rows) : '') })} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-sm text-sm font-bold transition-colors">
+                <Plus className="w-4 h-4"/> <span className="hidden sm:inline">新增</span>
               </button>
             )}
-            <button onClick={load} disabled={loading} className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg hover:bg-slate-50 shadow-sm disabled:opacity-50 transition-colors" title="重新整理">
+            <button onClick={() => load(activeSheet)} disabled={loading} className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg hover:bg-slate-50 shadow-sm disabled:opacity-50 transition-colors" title="重新整理">
               <Activity className={`w-4 h-4 text-amber-600 ${loading ? 'animate-pulse' : ''}`}/>
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 md:px-6 py-5 space-y-4">
-        {/* 權限說明 */}
-        {!canEdit && !loading && (
+      <main className="max-w-6xl mx-auto px-4 md:px-6 py-5 space-y-4">
+        {/* 工作表選擇 */}
+        {sheetNames.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-3 flex items-center gap-2 flex-wrap">
+            <label className="text-xs font-bold text-slate-500 px-1 flex items-center gap-1.5 whitespace-nowrap"><ListChecks className="w-4 h-4 text-amber-600"/> 項目</label>
+            <select value={activeSheet} onChange={e => switchSheet(e.target.value)} className="flex-1 min-w-[200px] border border-slate-200 rounded-lg p-2.5 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-white text-sm font-medium">
+              {groups.map(g => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.items.map(n => <option key={n} value={n}>{n}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* 設定／權限提示 */}
+        {needsUpgrade && (
+          <div className="bg-amber-50 rounded-2xl border border-amber-200 p-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5"/>
+            <p className="text-xs text-amber-800 leading-relaxed">
+              目前只讀得到第一張工作表。請將 <span className="font-mono font-bold">apps-script/performance-api.gs</span> 的新版內容貼回 Apps Script，
+              並用「管理部署作業 → 新版本」重新部署（網址不會變），即可顯示全部項目。
+            </p>
+          </div>
+        )}
+        {!canEdit && !loading && !needsUpgrade && (
           <div className="bg-white rounded-2xl border border-slate-200 p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5"/>
             <div className="text-sm text-slate-600 min-w-0">
@@ -501,30 +529,42 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
         <div className="bg-white rounded-2xl border border-slate-200 p-3 flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋計畫名稱、年度、經費…" className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-500 bg-slate-50 focus:bg-white text-sm transition-colors"/>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋本項目內容…" className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-500 bg-slate-50 focus:bg-white text-sm transition-colors"/>
           </div>
-          <span className="text-xs text-slate-500 font-bold px-2 whitespace-nowrap">{visible.length} / {rows.length}</span>
+          <span className="text-xs text-slate-500 font-bold px-2 whitespace-nowrap">{visible.length} / {table.rows.length}</span>
         </div>
 
-        {/* 清單 */}
+        {/* 清單：欄位依該張工作表的表頭 */}
         {error ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
             <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-rose-400"/>
             <p className="text-sm text-rose-600 font-medium">{error}</p>
-            <button onClick={load} className="mt-3 px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-bold hover:bg-slate-800">重試</button>
+            <button onClick={() => load(activeSheet)} className="mt-3 px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-bold hover:bg-slate-800">重試</button>
           </div>
-        ) : loading && rows.length === 0 ? (
+        ) : loading ? (
           <p className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 animate-pulse">讀取中…</p>
         ) : visible.length === 0 ? (
-          <p className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">{rows.length === 0 ? '尚無績效資料' : '找不到符合的項目'}</p>
+          <p className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">{table.rows.length === 0 ? '此項目尚無資料' : '找不到符合的項目'}</p>
         ) : (
           <div className="space-y-3">
-            {visible.map(item => (
-              <div key={item.rowNumber} className="bg-white rounded-2xl border border-slate-200 p-4 flex gap-4 hover:border-amber-300 hover:shadow-sm transition-all group">
-                <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 font-bold flex items-center justify-center flex-shrink-0 text-sm">{item.seq || '—'}</div>
-                <p className="text-sm text-slate-700 leading-relaxed flex-1 min-w-0 whitespace-pre-line break-words">{item.content}</p>
+            {visible.map(row => (
+              <div key={row.rowNumber} className="bg-white rounded-2xl border border-slate-200 p-4 flex gap-4 hover:border-amber-300 hover:shadow-sm transition-all group">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 font-bold flex items-center justify-center flex-shrink-0 text-sm">{row.cells[0] || '—'}</div>
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  {row.cells.slice(1).map((v, i) => {
+                    if (!v) return null;
+                    const label = table.headers[i + 1];
+                    const isMain = i === mainCellIndex(row.cells);
+                    return (
+                      <div key={i}>
+                        {label && !isMain && <span className="text-[10px] font-bold text-slate-400 mr-1.5">{label}</span>}
+                        <span className={isMain ? 'text-sm text-slate-700 leading-relaxed whitespace-pre-line break-words' : 'text-xs text-slate-600 font-medium'}>{v}</span>
+                      </div>
+                    );
+                  })}
+                </div>
                 {canEdit && (
-                  <button onClick={() => setEditing({ ...item })} className="p-2 h-9 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100" title="編輯">
+                  <button onClick={() => setEditing({ rowNumber: row.rowNumber, cells: [...row.cells] })} className="p-2 h-10 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100" title="編輯">
                     <Edit2 className="w-4 h-4"/>
                   </button>
                 )}
@@ -539,23 +579,32 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
         </p>
       </main>
 
-      {/* 新增／編輯視窗 */}
+      {/* 新增／編輯視窗：欄位依該張工作表的表頭動態產生 */}
       {editing && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => !saving && setEditing(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-5 border-b border-slate-100 pb-4">
-              <h3 className="text-xl font-bold text-amber-700">{editing.rowNumber ? '編輯績效' : '新增績效'}</h3>
+            <div className="flex justify-between items-center mb-1 border-b border-slate-100 pb-4">
+              <div className="min-w-0">
+                <h3 className="text-xl font-bold text-amber-700">{editing.rowNumber ? '編輯' : '新增'}</h3>
+                <p className="text-xs text-slate-400 truncate mt-0.5">{activeSheet}</p>
+              </div>
               <button onClick={() => !saving && setEditing(null)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
             </div>
-            <form onSubmit={save} className="space-y-4">
-              <div>
-                <label className="text-sm font-bold text-slate-700 mb-1 block">案次</label>
-                <input value={editing.seq} onChange={e => setEditing({ ...editing, seq: e.target.value })} className="w-28 border border-slate-200 rounded-lg p-2.5 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"/>
-              </div>
-              <div>
-                <label className="text-sm font-bold text-slate-700 mb-1 block">內容</label>
-                <textarea value={editing.content} onChange={e => setEditing({ ...editing, content: e.target.value })} rows={8} className="w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm leading-relaxed" placeholder="計畫名稱、職稱、期程、經費…" required/>
-              </div>
+            <form onSubmit={save} className="space-y-4 pt-4">
+              {editing.cells.map((v, i) => {
+                const label = table.headers[i] || `第 ${i + 1} 欄`;
+                const isLong = i === editing.cells.length - 1 || v.length > 60;
+                return (
+                  <div key={i}>
+                    <label className="text-sm font-bold text-slate-700 mb-1 block">{label}</label>
+                    {isLong ? (
+                      <textarea value={v} onChange={e => { const c = [...editing.cells]; c[i] = e.target.value; setEditing({ ...editing, cells: c }); }} rows={6} className="w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm leading-relaxed"/>
+                    ) : (
+                      <input value={v} onChange={e => { const c = [...editing.cells]; c[i] = e.target.value; setEditing({ ...editing, cells: c }); }} className="w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"/>
+                    )}
+                  </div>
+                );
+              })}
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setEditing(null)} disabled={saving} className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 disabled:opacity-50 transition-colors">取消</button>
                 <button type="submit" disabled={saving} className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow-md disabled:opacity-50 transition-colors">{saving ? '寫入試算表中…' : '儲存到試算表'}</button>

@@ -1,12 +1,13 @@
 /**
- * 龔老師績效 — 系統讀寫 API（Google Apps Script）
+ * 龔老師成果績效 — 系統讀寫 API（Google Apps Script）
  * =====================================================================
  * 這支腳本讓實驗室管理系統可以讀寫績效試算表，而且：
  *   - 使用者不需要任何 Google 授權，不會看到「未驗證應用程式」警告
  *   - 誰能編輯，完全依「這份試算表的共用設定」決定（編輯者才能改）
  *   - 試算表可以設成完全不公開
+ *   - 支援全部工作表，每張表各自的欄位原樣呈現
  *
- * 部署步驟（只需做一次）
+ * 首次部署（只需做一次）
  * ---------------------------------------------------------------------
  * 1. 開啟績效試算表 → 上方選單「擴充功能」→「Apps Script」
  * 2. 把編輯器內原有內容刪掉，貼上本檔全部內容，按存檔
@@ -16,9 +17,13 @@
  *      誰可以存取：任何人
  *    →「部署」
  * 4. 首次會要求授權，選您的帳號 →「進階」→「前往...（不安全）」→「允許」
- *    （這是授權給您自己寫的腳本，只有您會看到這個畫面一次）
- * 5. 複製最後出現的「網頁應用程式網址」（https://script.google.com/macros/s/.../exec）
- *    交給系統設定即可
+ * 5. 複製「網頁應用程式網址」交給系統設定
+ *
+ * ⚠️ 更新腳本時（網址不變的做法）
+ * ---------------------------------------------------------------------
+ * 貼上新版程式碼存檔後，請用「部署」→「管理部署作業」→ 右上鉛筆圖示
+ * → 版本選「新版本」→「部署」。
+ * 若改用「新增部署作業」會產生新網址，系統就連不上了。
  *
  * 安全性說明
  * ---------------------------------------------------------------------
@@ -36,7 +41,7 @@ var FIREBASE_API_KEY = 'AIzaSyABbI80ZUt5nhuIB5bkc2sOnLyZXCC2bmE';
 
 /** 用瀏覽器直接開啟部署網址時的健康檢查，方便確認部署成功 */
 function doGet() {
-  return json({ ok: true, message: '績效 API 運作中，請以 POST 呼叫。' });
+  return json({ ok: true, version: 2, message: '績效 API 運作中（v2：支援全部工作表），請以 POST 呼叫。' });
 }
 
 function doPost(e) {
@@ -49,26 +54,37 @@ function doPost(e) {
 
     // 2) 依試算表共用設定判斷這個人能不能編輯
     var canEdit = hasEditPermission(email);
-    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
+    var book = SpreadsheetApp.openById(SHEET_ID);
+    var names = book.getSheets().map(function (s) { return s.getName(); });
 
+    // 取得所有工作表名稱 + 指定工作表的內容（沒指定就給第一張）
     if (req.action === 'list') {
-      return json({ ok: true, email: email, canEdit: canEdit, values: readAll(sheet) });
+      var name = req.sheet && names.indexOf(req.sheet) >= 0 ? req.sheet : names[0];
+      return json({
+        ok: true, version: 2, email: email, canEdit: canEdit,
+        sheets: names, sheet: name, values: readAll(book.getSheetByName(name))
+      });
     }
 
     if (req.action === 'save') {
       if (!canEdit) return json({ ok: false, error: '此帳號沒有這份試算表的編輯權限。' });
+      if (!req.sheet || names.indexOf(req.sheet) < 0) return json({ ok: false, error: '找不到工作表：' + req.sheet });
 
-      var seq = req.seq == null ? '' : String(req.seq);
-      var content = req.content == null ? '' : String(req.content);
-      if (!content.replace(/\s/g, '')) return json({ ok: false, error: '內容不可空白。' });
+      var sheet = book.getSheetByName(req.sheet);
+      var values = (req.values || []).map(function (v) { return v == null ? '' : String(v); });
+      if (!values.length) return json({ ok: false, error: '沒有要寫入的內容。' });
+      if (!values.join('').replace(/\s/g, '')) return json({ ok: false, error: '內容不可全部空白。' });
 
       if (req.rowNumber) {
-        sheet.getRange(Number(req.rowNumber), 1, 1, 2).setValues([[seq, content]]);
+        sheet.getRange(Number(req.rowNumber), 1, 1, values.length).setValues([values]);
       } else {
-        sheet.appendRow([seq, content]);
+        sheet.appendRow(values);
       }
       SpreadsheetApp.flush();
-      return json({ ok: true, email: email, canEdit: true, values: readAll(sheet) });
+      return json({
+        ok: true, version: 2, email: email, canEdit: true,
+        sheets: names, sheet: req.sheet, values: readAll(sheet)
+      });
     }
 
     return json({ ok: false, error: '未知的操作：' + req.action });
@@ -79,8 +95,8 @@ function doPost(e) {
 
 /** 讀取整張表（以顯示文字為準，避免日期／數字被轉成物件） */
 function readAll(sheet) {
-  var range = sheet.getDataRange();
-  return range ? range.getDisplayValues() : [];
+  if (!sheet || sheet.getLastRow() === 0) return [];
+  return sheet.getDataRange().getDisplayValues();
 }
 
 /** 向 Firebase 驗證 ID Token，回傳已驗證的 Email（失敗回空字串） */
