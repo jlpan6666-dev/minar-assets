@@ -387,7 +387,7 @@ const CabinetGrid = ({ grid, cols, selectedSlot, onSelect, statusFilter = 'all' 
   </div>
 );
 
-// --- 元件：櫃位選擇彈窗（縮小版櫃位圖；已有其他設備的格子反灰不可選） ---
+// --- 元件：櫃位選擇彈窗（縮小版櫃位圖；已有設備的格子仍可選，同格可放多樣設備） ---
 const SlotPickerModal = ({ isOpen, onClose, grid, cols, currentSlot, editItemId, onPick }) => {
   if (!isOpen) return null;
   const rows = Array.from(new Set(grid.map(g => g.row)));
@@ -400,7 +400,7 @@ const SlotPickerModal = ({ isOpen, onClose, grid, cols, currentSlot, editItemId,
           <h3 className="text-lg font-bold text-teal-700 flex items-center gap-2"><Grid3x3 className="w-5 h-5"/> 選擇櫃位</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5"/></button>
         </div>
-        <p className="text-xs text-slate-400 mb-4">灰色代表已有其他設備，無法選取；點空白格即可指定位置</p>
+        <p className="text-xs text-slate-400 mb-4">點任一格即可指定位置；已有設備的格子會標出數量，仍可選擇（同格可放多樣設備）</p>
 
         <div className="overflow-x-auto">
           <div className="inline-block min-w-full">
@@ -421,16 +421,20 @@ const SlotPickerModal = ({ isOpen, onClose, grid, cols, currentSlot, editItemId,
                     <button
                       key={cell.slot}
                       type="button"
-                      disabled={taken}
                       onClick={() => { onPick(cell.slot); onClose(); }}
                       title={taken ? `${cell.slot}｜已有：${others.map(i => i.name).join('、')}` : `${cell.slot}｜空位`}
-                      className={`h-9 rounded border-2 text-[10px] font-bold transition-all
+                      className={`h-9 rounded border-2 text-[10px] font-bold transition-all relative active:scale-95
                         ${taken
-                          ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
-                          : 'bg-white border-slate-200 text-slate-500 hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700 active:scale-95'}
+                          ? 'bg-teal-50/70 border-teal-200 text-teal-700 hover:border-teal-500 hover:bg-teal-100'
+                          : 'bg-white border-slate-200 text-slate-500 hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700'}
                         ${selected ? 'ring-2 ring-teal-500 ring-offset-1 border-teal-500 bg-teal-50 text-teal-700' : ''}`}
                     >
                       {cell.slot}
+                      {taken && (
+                        <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-teal-600 text-white text-[9px] leading-[14px] font-bold shadow-sm">
+                          {others.length}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -449,7 +453,12 @@ const SlotPickerModal = ({ isOpen, onClose, grid, cols, currentSlot, editItemId,
 };
 
 // --- 元件：櫃位詳細資訊面板（點格子後顯示該格設備） ---
-const CabinetDetail = ({ cell, categories, canEdit, onEdit, onBorrow, onImageClick, fallbackImage }) => {
+// pageSize：一頁顯示幾項設備（超過就用點點分頁切換）；不給則一次全部列出
+const CabinetDetail = ({ cell, categories, canEdit, onEdit, onBorrow, onImageClick, fallbackImage, pageSize }) => {
+  const [page, setPage] = useState(0);
+  // 換櫃位時回到第一頁
+  useEffect(() => { setPage(0); }, [cell?.slot]);
+
   if (!cell) return (
     <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-400">
       <PackageOpen className="w-12 h-12 mb-3 opacity-40" />
@@ -459,6 +468,10 @@ const CabinetDetail = ({ cell, categories, canEdit, onEdit, onBorrow, onImageCli
   );
 
   const style = SLOT_STYLES[cell.status];
+  const size = pageSize && pageSize > 0 ? pageSize : cell.items.length || 1;
+  const totalPages = Math.max(1, Math.ceil(cell.items.length / size));
+  const safePage = Math.min(page, totalPages - 1);
+  const visibleItems = cell.items.slice(safePage * size, safePage * size + size);
   return (
     <div className="p-4 md:p-5 space-y-4">
       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -481,7 +494,7 @@ const CabinetDetail = ({ cell, categories, canEdit, onEdit, onBorrow, onImageCli
 
       {cell.items.length === 0 ? (
         <p className="text-sm text-slate-400 text-center py-8">此櫃位目前沒有設備</p>
-      ) : cell.items.map(item => {
+      ) : visibleItems.map(item => {
         const available = Math.max(0, (item.quantity || 0) - (item.borrowedCount || 0));
         return (
           <div key={item.id} className="bg-slate-50 rounded-xl border border-slate-100 p-3 flex gap-3">
@@ -515,6 +528,28 @@ const CabinetDetail = ({ cell, categories, canEdit, onEdit, onBorrow, onImageCli
           </div>
         );
       })}
+
+      {/* 🟢 超過一頁時用點點切換（避免面板拉太長超出畫面） */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-1">
+          <button type="button" onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage === 0} className="p-1 text-slate-400 hover:text-teal-600 disabled:opacity-25 disabled:hover:text-slate-400 transition-colors">
+            <ChevronLeft className="w-4 h-4"/>
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setPage(i)}
+              title={`第 ${i + 1} 頁`}
+              className={`h-2 rounded-full transition-all ${i === safePage ? 'w-5 bg-teal-600' : 'w-2 bg-slate-300 hover:bg-slate-400'}`}
+            />
+          ))}
+          <button type="button" onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} disabled={safePage === totalPages - 1} className="p-1 text-slate-400 hover:text-teal-600 disabled:opacity-25 disabled:hover:text-slate-400 transition-colors">
+            <ChevronRight className="w-4 h-4"/>
+          </button>
+          <span className="ml-1 text-[11px] text-slate-400 font-medium">{safePage + 1}/{totalPages}</span>
+        </div>
+      )}
     </div>
   );
 };
@@ -2548,6 +2583,7 @@ export default function App() {
                             onBorrow={() => {}}
                             onImageClick={setFullScreenImage}
                             fallbackImage={FALLBACK_IMAGE_SRC}
+                            pageSize={2}
                           />
                         </div>
                       )}
@@ -3383,7 +3419,7 @@ export default function App() {
                           <Grid3x3 className="w-4 h-4"/> 從櫃位圖選擇
                         </span>
                       </button>
-                      <p className="text-xs text-slate-400 mt-1">點按開啟櫃位圖，目前還有 {freeSlotCount} 個空位可選</p>
+                      <p className="text-xs text-slate-400 mt-1">點按開啟櫃位圖選擇位置，目前有 {freeSlotCount} 個空格</p>
                     </div>
                     <div><label className="text-sm font-bold text-slate-700 mb-1 block">備註</label><input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none text-sm" value={equipForm.note} onChange={e=>setEquipForm({...equipForm, note:e.target.value})}/></div>
                     </>
