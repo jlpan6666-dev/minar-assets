@@ -3112,7 +3112,7 @@ export default function App() {
                   </div>
                   <div className="mt-4 pt-4 border-t border-slate-100 flex items-start gap-2 text-xs text-slate-500">
                     <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5"/>
-                    <p>在要盤點的電腦上執行「下載掃描工具」取得的 .bat（需以系統管理員身分執行較完整），掃描結果會自動寫回試算表，回到此頁按重新整理即可看到。</p>
+                    <p>在要盤點的電腦上下載掃描工具，<span className="font-bold text-slate-600">解壓縮後執行裡面的 .bat</span>（以系統管理員身分執行可取得較完整資訊）。掃描結果會自動寫回試算表，回到此頁即會重新載入。</p>
                   </div>
                 </div>
 

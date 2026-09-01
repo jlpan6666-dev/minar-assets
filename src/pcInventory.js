@@ -1,14 +1,14 @@
 // 電腦盤點試算表的純函式：不依賴 React / Firebase，可單獨測試
 // 資料由「電腦資訊快速查詢.bat」掃描後寫入 Google 試算表，系統端只負責讀取顯示（唯讀）
 
-export const PC_SHEET_ID = '18yPL7bCspyBo2FEHQc-5OdNG_FwQPa8AuTe-v3XyZxM';
+export const PC_SHEET_ID = '1qVp95yg-6HGSb2kWQ4-Bg8E-uF6mFgusYbEH_9uYm6E';
 export const PC_SHEET_EDIT_URL = `https://docs.google.com/spreadsheets/d/${PC_SHEET_ID}/edit`;
 // gviz 端點對公開試算表會回傳 CORS 標頭，可直接於瀏覽器讀取
 export const PC_SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${PC_SHEET_ID}/gviz/tq?tqx=out:csv`;
 
-// 掃描工具（放在 public/，部署後同網域可直接下載）
-export const SCAN_TOOL_PATH = '/pc-scan.bat';
-export const SCAN_TOOL_FILENAME = '電腦資訊快速查詢_v2.bat';
+// 掃描工具（放在 public/，部署後同網域可直接下載；壓縮檔可避免瀏覽器攔截 .bat）
+export const SCAN_TOOL_PATH = '/pc-scan.zip';
+export const SCAN_TOOL_FILENAME = '電腦資訊快速查詢_v3.zip';
 
 // 表頭關鍵欄位，用來辨識第一列是否為表頭（欄位格式以試算表為準，不在系統端改動）
 const HEADER_HINT = '設備識別碼';
