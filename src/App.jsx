@@ -35,13 +35,14 @@ import {
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
   FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut,
   Key, GripHorizontal, Grid3x3, PackageOpen,
-  Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp, Rocket, ExternalLink
+  Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp, Rocket, ExternalLink, Award
 } from 'lucide-react';
 
 import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
+import { PERF_SHEET_CSV_URL, PERF_SHEET_EDIT_URL, SHEETS_SCOPES, appendUrl, updateUrl, canEditUrl, parsePerfRows, filterPerfRows, nextSeq } from './performance';
 import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
@@ -78,7 +79,9 @@ const SYSTEM_CONFIGS = [
   { id: 'property_jl', name: '建良老師設備管理', icon: Box, pwd: 'jlpan@314', colorClass: 'bg-blue-600', hoverClass: 'hover:bg-blue-700', textClass: 'text-blue-600' },
   { id: 'property_kung', name: '龔老師財產盤點', icon: Box, pwd: 'kung7917', colorClass: 'bg-indigo-600', hoverClass: 'hover:bg-indigo-700', textClass: 'text-indigo-600' },
   // 🟢 外部系統：不進入本系統，直接開新分頁（有自己的登入，僅限校內網路）
-  { id: 'projects', name: '歷屆專案系統', icon: Rocket, externalUrl: 'http://140.127.22.162:8088', hint: '私有部署平台', notice: '僅限校內網路連線', colorClass: 'bg-purple-600', hoverClass: 'hover:bg-purple-700', textClass: 'text-purple-600' }
+  { id: 'projects', name: '歷屆專案系統', icon: Rocket, externalUrl: 'http://140.127.22.162:8088', hint: '私有部署平台', notice: '僅限校內網路連線', colorClass: 'bg-purple-600', hoverClass: 'hover:bg-purple-700', textClass: 'text-purple-600' },
+  // 🟢 系統內獨立頁面（不走一般的版次/設備架構）
+  { id: 'performance', name: '龔老師績效', icon: Award, standalone: true, hint: '研究計畫一覽', colorClass: 'bg-amber-600', hoverClass: 'hover:bg-amber-700', textClass: 'text-amber-600' }
 ];
 
 // --- 🟢 Google 授權設定 ---
@@ -390,6 +393,205 @@ const CabinetGrid = ({ grid, cols, selectedSlot, onSelect, statusFilter = 'all' 
     </div>
   </div>
 );
+
+// --- 頁面：龔老師績效（顯示走公開 CSV；編輯需該試算表的 Google 編輯權限） ---
+const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) => {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+
+  // Sheets 授權狀態：token 只留在記憶體，不寫入 localStorage
+  const [token, setToken] = useState(null);
+  const [canEdit, setCanEdit] = useState(false);
+  const [authing, setAuthing] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  // 編輯中的項目：{ rowNumber: null 代表新增 }
+  const [editing, setEditing] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`${PERF_SHEET_CSV_URL}&_=${Date.now()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setRows(parsePerfRows(parseCsvText(await res.text())));
+    } catch (e) {
+      console.error(e);
+      setError('無法讀取績效試算表，請確認共用設定或稍後再試。');
+    } finally { setLoading(false); }
+  }, [parseCsvText]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // 🟢 增量授權：只有按下「啟用編輯」才向 Google 要 Sheets 權限，一般成員登入不會被打擾
+  const enableEditing = async () => {
+    setAuthing(true); setAuthError('');
+    try {
+      const provider = new GoogleAuthProvider();
+      SHEETS_SCOPES.forEach(s => provider.addScope(s));
+      if (user?.email) provider.setCustomParameters({ login_hint: user.email });
+      const cred = await signInWithPopup(auth, provider);
+      const accessToken = GoogleAuthProvider.credentialFromResult(cred)?.accessToken;
+      if (!accessToken) throw new Error('沒有取得授權憑證');
+
+      // 用 Drive 檔案權限判斷這個帳號能不能編輯這份試算表
+      const meta = await fetch(canEditUrl(), { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!meta.ok) throw new Error(`檢查權限失敗（HTTP ${meta.status}）`);
+      const info = await meta.json();
+      setToken(accessToken);
+      setCanEdit(!!info.capabilities?.canEdit);
+      if (!info.capabilities?.canEdit) setAuthError(`此帳號（${cred.user.email}）沒有這份試算表的編輯權限，僅能檢視。`);
+    } catch (e) {
+      if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+        console.error(e);
+        setAuthError(e.message || '授權失敗，請稍後再試。');
+      }
+    } finally { setAuthing(false); }
+  };
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (!editing || !token) return;
+    const content = editing.content.trim();
+    if (!content) { showToast('內容不可空白', 'error'); return; }
+    setSaving(true);
+    try {
+      const isNew = !editing.rowNumber;
+      const res = await fetch(isNew ? appendUrl() : updateUrl(editing.rowNumber), {
+        method: isNew ? 'POST' : 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: [[editing.seq, content]] }),
+      });
+      if (res.status === 401) throw new Error('授權已過期，請重新按「啟用編輯」授權一次。');
+      if (res.status === 403) throw new Error('沒有這份試算表的編輯權限。');
+      if (!res.ok) throw new Error(`寫入失敗（HTTP ${res.status}）`);
+      showToast(isNew ? '已新增一筆績效' : '已更新');
+      setEditing(null);
+      await load();
+    } catch (err) {
+      console.error(err);
+      showToast(err.message, 'error');
+    } finally { setSaving(false); }
+  };
+
+  const visible = filterPerfRows(rows, search);
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <button onClick={onBack} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors flex-shrink-0" title="返回系統入口"><ChevronLeft className="w-5 h-5"/></button>
+            <div className="min-w-0">
+              <h1 className="text-lg md:text-xl font-bold text-slate-800 truncate">龔老師研究計畫績效</h1>
+              <p className="text-xs text-slate-400">共 {rows.length} 筆{canEdit && ' · 可編輯'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {canEdit ? (
+              <button onClick={() => setEditing({ rowNumber: null, seq: nextSeq(rows), content: '' })} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-sm text-sm font-bold transition-colors">
+                <Plus className="w-4 h-4"/> <span className="hidden sm:inline">新增績效</span>
+              </button>
+            ) : (
+              <button onClick={enableEditing} disabled={authing} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm text-sm font-bold disabled:opacity-50 transition-colors">
+                <Key className="w-4 h-4 text-amber-600"/> {authing ? '授權中…' : '啟用編輯'}
+              </button>
+            )}
+            <button onClick={load} disabled={loading} className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg hover:bg-slate-50 shadow-sm disabled:opacity-50 transition-colors" title="重新整理">
+              <Activity className={`w-4 h-4 text-amber-600 ${loading ? 'animate-pulse' : ''}`}/>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-5xl mx-auto px-4 md:px-6 py-5 space-y-4">
+        {/* 權限說明 */}
+        {!canEdit && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5"/>
+            <div className="text-sm text-slate-600 min-w-0">
+              <p className="font-bold text-slate-700 mb-1">目前為檢視模式</p>
+              <p className="text-xs leading-relaxed">
+                若您的 Google 帳號有這份試算表的編輯權限，按「啟用編輯」授權後即可直接在此新增或修改；
+                沒有權限的帳號仍可瀏覽全部內容。
+              </p>
+              {authError && <p className="text-xs text-rose-600 font-medium mt-2">{authError}</p>}
+            </div>
+          </div>
+        )}
+
+        {/* 搜尋 */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-3 flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋計畫名稱、年度、經費…" className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-500 bg-slate-50 focus:bg-white text-sm transition-colors"/>
+          </div>
+          <span className="text-xs text-slate-500 font-bold px-2 whitespace-nowrap">{visible.length} / {rows.length}</span>
+        </div>
+
+        {/* 清單 */}
+        {error ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+            <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-rose-400"/>
+            <p className="text-sm text-rose-600 font-medium">{error}</p>
+            <button onClick={load} className="mt-3 px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-bold hover:bg-slate-800">重試</button>
+          </div>
+        ) : loading && rows.length === 0 ? (
+          <p className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 animate-pulse">讀取中…</p>
+        ) : visible.length === 0 ? (
+          <p className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">{rows.length === 0 ? '尚無績效資料' : '找不到符合的項目'}</p>
+        ) : (
+          <div className="space-y-3">
+            {visible.map(item => (
+              <div key={item.rowNumber} className="bg-white rounded-2xl border border-slate-200 p-4 flex gap-4 hover:border-amber-300 hover:shadow-sm transition-all group">
+                <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 font-bold flex items-center justify-center flex-shrink-0 text-sm">{item.seq || '—'}</div>
+                <p className="text-sm text-slate-700 leading-relaxed flex-1 min-w-0 whitespace-pre-line break-words">{item.content}</p>
+                {canEdit && (
+                  <button onClick={() => setEditing({ ...item })} className="p-2 h-9 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100" title="編輯">
+                    <Edit2 className="w-4 h-4"/>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="text-xs text-slate-400 text-center pt-2">
+          資料來源為 Google 試算表，
+          <a href={PERF_SHEET_EDIT_URL} target="_blank" rel="noopener noreferrer" className="text-amber-600 hover:underline font-medium">於試算表開啟</a>
+        </p>
+      </main>
+
+      {/* 新增／編輯視窗 */}
+      {editing && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => !saving && setEditing(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-5 border-b border-slate-100 pb-4">
+              <h3 className="text-xl font-bold text-amber-700">{editing.rowNumber ? '編輯績效' : '新增績效'}</h3>
+              <button onClick={() => !saving && setEditing(null)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
+            </div>
+            <form onSubmit={save} className="space-y-4">
+              <div>
+                <label className="text-sm font-bold text-slate-700 mb-1 block">案次</label>
+                <input value={editing.seq} onChange={e => setEditing({ ...editing, seq: e.target.value })} className="w-28 border border-slate-200 rounded-lg p-2.5 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"/>
+              </div>
+              <div>
+                <label className="text-sm font-bold text-slate-700 mb-1 block">內容</label>
+                <textarea value={editing.content} onChange={e => setEditing({ ...editing, content: e.target.value })} rows={8} className="w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm leading-relaxed" placeholder="計畫名稱、職稱、期程、經費…" required/>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setEditing(null)} disabled={saving} className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 disabled:opacity-50 transition-colors">取消</button>
+                <button type="submit" disabled={saving} className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow-md disabled:opacity-50 transition-colors">{saving ? '寫入試算表中…' : '儲存到試算表'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // --- 元件：電腦盤點卡片（重點規格一目了然，展開可看試算表的所有欄位） ---
 // 卡片主要顯示的欄位名稱；其餘欄位在展開時逐項列出，確保不漏資料
@@ -837,7 +1039,7 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, access, membersLoaded, 
 
         {!selectedSys ? (() => {
           // 外部系統（有自己的登入）一律顯示；本系統各模組依成員權限過濾
-          const visibleSystems = SYSTEM_CONFIGS.filter(sys => sys.externalUrl || access.systems.includes(sys.id));
+          const visibleSystems = SYSTEM_CONFIGS.filter(sys => sys.externalUrl || sys.standalone || access.systems.includes(sys.id));
           // 卡片數決定欄數：4 張排成 2×2 比落單一張好看
           const n = visibleSystems.length;
           const cols = n >= 5 ? 'md:grid-cols-2 xl:grid-cols-3'
@@ -852,13 +1054,13 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, access, membersLoaded, 
               const direct = sys.id === 'property_jl'; // 🟢 建良老師系統：成員免密碼直接進入
               const openExternal = () => window.open(sys.externalUrl, '_blank', 'noopener,noreferrer');
               return (
-                <div key={sys.id} onClick={() => sys.externalUrl ? openExternal() : direct ? enterDirect(sys.id) : setSelectedSystem(sys)} className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:-translate-y-2 transition-all group flex flex-col items-center text-center relative">
+                <div key={sys.id} onClick={() => sys.externalUrl ? openExternal() : (sys.standalone || direct) ? enterDirect(sys.id) : setSelectedSystem(sys)} className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:-translate-y-2 transition-all group flex flex-col items-center text-center relative">
                   {sys.externalUrl && <ExternalLink className="w-4 h-4 text-slate-300 absolute top-4 right-4 group-hover:text-slate-500 transition-colors" />}
                   <div className={`w-20 h-20 rounded-2xl flex items-center justify-center mb-6 shadow-md transition-transform group-hover:scale-110 ${sys.colorClass}`}>
                     <Icon className="w-10 h-10 text-white" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800 mb-2">{sys.name}</h3>
-                  <p className="text-sm text-slate-400">{sys.externalUrl ? '點擊另開分頁' : direct ? '點擊直接進入 (成員已驗證)' : '點擊進入登入頁面'}{sys.hint && ` · ${sys.hint}`}</p>
+                  <p className="text-sm text-slate-400">{sys.externalUrl ? '點擊另開分頁' : (sys.standalone || direct) ? '點擊直接進入 (成員已驗證)' : '點擊進入登入頁面'}{sys.hint && ` · ${sys.hint}`}</p>
                   {sys.notice && (
                     <span className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold">
                       <AlertTriangle className="w-3.5 h-3.5"/> {sys.notice}
@@ -1104,6 +1306,9 @@ export default function App() {
   useEffect(() => {
     if (!appMode || !user || !membersLoaded) return;
     if (!access) { handleLogout(); return; }
+    // standalone 頁面（如績效）不屬於成員系統權限的管轄範圍，跳過檢查
+    const cfg = SYSTEM_CONFIGS.find(s => s.id === appMode);
+    if (cfg?.standalone) return;
     if (!access.systems.includes(appMode)) {
       localStorage.removeItem('appMode');
       setAppMode(null);
@@ -2349,6 +2554,14 @@ export default function App() {
     <>
       {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
       <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} access={access} membersLoaded={membersLoaded} isAdmin={isAdmin} members={members} onAddMember={handleAddMember} onUpdateMember={handleUpdateMember} onRemoveMember={handleRemoveMember} />
+    </>
+  );
+
+  // 🟢 績效為獨立頁面，不套用一般系統的側欄／版次架構
+  if (appMode === 'performance') return (
+    <>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
+      <PerformancePage user={user} onBack={() => { localStorage.removeItem('appMode'); setAppMode(null); }} parseCSV={parseCSV} showToast={showToast} />
     </>
   );
 
