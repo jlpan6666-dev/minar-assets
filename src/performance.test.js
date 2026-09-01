@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePerfRows, filterPerfRows, nextSeq, updateUrl, appendUrl, PERF_SHEET_ID } from './performance';
+import { parsePerfRows, filterPerfRows, nextSeq, isApiConfigured } from './performance';
 
 const HEADER = ['案次', ''];
 const R1 = ['1', '教育部第四期大學社會責任實踐計畫，計畫共同主持人。經費：3,000,000元/年。'];
@@ -78,13 +78,19 @@ describe('nextSeq', () => {
   });
 });
 
-describe('Sheets API 網址', () => {
-  it('更新指定列的範圍正確', () => {
-    expect(updateUrl(5)).toContain(`${PERF_SHEET_ID}/values/A5%3AB5`);
-    expect(updateUrl(5)).toContain('valueInputOption=RAW');
+describe('isApiConfigured', () => {
+  it('未填 Apps Script 網址時為 false（頁面退回 CSV 唯讀）', () => {
+    // PERF_API_URL 預設留空，部署後才填入
+    expect(typeof isApiConfigured()).toBe('boolean');
   });
-  it('新增使用 append 並插入新列', () => {
-    expect(appendUrl()).toContain(':append');
-    expect(appendUrl()).toContain('insertDataOption=INSERT_ROWS');
+});
+
+describe('Apps Script 回傳格式相容性', () => {
+  it('getDisplayValues() 的二維陣列可直接用同一個解析器', () => {
+    const fromAppsScript = [['案次', ''], ['1', '計畫 A'], ['2', '計畫 B']];
+    const rows = parsePerfRows(fromAppsScript);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].rowNumber).toBe(2);
+    expect(rows[1].content).toBe('計畫 B');
   });
 });

@@ -42,7 +42,7 @@ import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } f
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
-import { PERF_SHEET_CSV_URL, PERF_SHEET_EDIT_URL, SHEETS_SCOPES, appendUrl, updateUrl, canEditUrl, parsePerfRows, filterPerfRows, nextSeq } from './performance';
+import { PERF_SHEET_CSV_URL, PERF_SHEET_EDIT_URL, PERF_API_URL, isApiConfigured, callPerfApi, parsePerfRows, filterPerfRows, nextSeq } from './performance';
 import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
@@ -401,11 +401,8 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
 
-  // Sheets 授權狀態：token 只留在記憶體，不寫入 localStorage
-  const [token, setToken] = useState(null);
+  // 能否編輯由 Apps Script 依「試算表共用設定」判定，使用者不需任何額外授權
   const [canEdit, setCanEdit] = useState(false);
-  const [authing, setAuthing] = useState(false);
-  const [authError, setAuthError] = useState('');
 
   // 編輯中的項目：{ rowNumber: null 代表新增 }
   const [editing, setEditing] = useState(null);
@@ -414,62 +411,44 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${PERF_SHEET_CSV_URL}&_=${Date.now()}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setRows(parsePerfRows(parseCsvText(await res.text())));
+      if (isApiConfigured()) {
+        const idToken = await user.getIdToken();
+        const data = await callPerfApi({ action: 'list', idToken });
+        setRows(parsePerfRows(data.values));
+        setCanEdit(!!data.canEdit);
+      } else {
+        // 尚未部署 Apps Script：退回公開 CSV 唯讀顯示
+        const res = await fetch(`${PERF_SHEET_CSV_URL}&_=${Date.now()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setRows(parsePerfRows(parseCsvText(await res.text())));
+        setCanEdit(false);
+      }
     } catch (e) {
       console.error(e);
-      setError('無法讀取績效試算表，請確認共用設定或稍後再試。');
+      setError(e.message || '無法讀取績效試算表，請稍後再試。');
     } finally { setLoading(false); }
-  }, [parseCsvText]);
+  }, [parseCsvText, user]);
 
   useEffect(() => { load(); }, [load]);
 
-  // 🟢 增量授權：只有按下「啟用編輯」才向 Google 要 Sheets 權限，一般成員登入不會被打擾
-  const enableEditing = async () => {
-    setAuthing(true); setAuthError('');
-    try {
-      const provider = new GoogleAuthProvider();
-      SHEETS_SCOPES.forEach(s => provider.addScope(s));
-      if (user?.email) provider.setCustomParameters({ login_hint: user.email });
-      const cred = await signInWithPopup(auth, provider);
-      const accessToken = GoogleAuthProvider.credentialFromResult(cred)?.accessToken;
-      if (!accessToken) throw new Error('沒有取得授權憑證');
-
-      // 用 Drive 檔案權限判斷這個帳號能不能編輯這份試算表
-      const meta = await fetch(canEditUrl(), { headers: { Authorization: `Bearer ${accessToken}` } });
-      if (!meta.ok) throw new Error(`檢查權限失敗（HTTP ${meta.status}）`);
-      const info = await meta.json();
-      setToken(accessToken);
-      setCanEdit(!!info.capabilities?.canEdit);
-      if (!info.capabilities?.canEdit) setAuthError(`此帳號（${cred.user.email}）沒有這份試算表的編輯權限，僅能檢視。`);
-    } catch (e) {
-      if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
-        console.error(e);
-        setAuthError(e.message || '授權失敗，請稍後再試。');
-      }
-    } finally { setAuthing(false); }
-  };
-
   const save = async (e) => {
     e.preventDefault();
-    if (!editing || !token) return;
+    if (!editing) return;
     const content = editing.content.trim();
     if (!content) { showToast('內容不可空白', 'error'); return; }
     setSaving(true);
     try {
-      const isNew = !editing.rowNumber;
-      const res = await fetch(isNew ? appendUrl() : updateUrl(editing.rowNumber), {
-        method: isNew ? 'POST' : 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: [[editing.seq, content]] }),
+      const idToken = await user.getIdToken();
+      const data = await callPerfApi({
+        action: 'save',
+        idToken,
+        rowNumber: editing.rowNumber || null,
+        seq: editing.seq,
+        content,
       });
-      if (res.status === 401) throw new Error('授權已過期，請重新按「啟用編輯」授權一次。');
-      if (res.status === 403) throw new Error('沒有這份試算表的編輯權限。');
-      if (!res.ok) throw new Error(`寫入失敗（HTTP ${res.status}）`);
-      showToast(isNew ? '已新增一筆績效' : '已更新');
+      setRows(parsePerfRows(data.values)); // 直接用回傳的最新內容，省一次往返
+      showToast(editing.rowNumber ? '已更新' : '已新增一筆績效');
       setEditing(null);
-      await load();
     } catch (err) {
       console.error(err);
       showToast(err.message, 'error');
@@ -490,13 +469,9 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            {canEdit ? (
+            {canEdit && (
               <button onClick={() => setEditing({ rowNumber: null, seq: nextSeq(rows), content: '' })} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-sm text-sm font-bold transition-colors">
                 <Plus className="w-4 h-4"/> <span className="hidden sm:inline">新增績效</span>
-              </button>
-            ) : (
-              <button onClick={enableEditing} disabled={authing} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm text-sm font-bold disabled:opacity-50 transition-colors">
-                <Key className="w-4 h-4 text-amber-600"/> {authing ? '授權中…' : '啟用編輯'}
               </button>
             )}
             <button onClick={load} disabled={loading} className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg hover:bg-slate-50 shadow-sm disabled:opacity-50 transition-colors" title="重新整理">
@@ -508,16 +483,16 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
 
       <main className="max-w-5xl mx-auto px-4 md:px-6 py-5 space-y-4">
         {/* 權限說明 */}
-        {!canEdit && (
+        {!canEdit && !loading && (
           <div className="bg-white rounded-2xl border border-slate-200 p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5"/>
             <div className="text-sm text-slate-600 min-w-0">
               <p className="font-bold text-slate-700 mb-1">目前為檢視模式</p>
               <p className="text-xs leading-relaxed">
-                若您的 Google 帳號有這份試算表的編輯權限，按「啟用編輯」授權後即可直接在此新增或修改；
-                沒有權限的帳號仍可瀏覽全部內容。
+                {isApiConfigured()
+                  ? `您的帳號（${user?.email || ''}）不在這份試算表的編輯者名單中，因此僅能瀏覽。若需編輯，請在試算表將此帳號加為編輯者。`
+                  : '編輯功能尚未啟用（需先部署績效 API）。目前可瀏覽與搜尋全部內容。'}
               </p>
-              {authError && <p className="text-xs text-rose-600 font-medium mt-2">{authError}</p>}
             </div>
           </div>
         )}
