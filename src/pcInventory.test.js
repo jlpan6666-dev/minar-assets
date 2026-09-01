@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePcRows, filterPcRows, latestUpdatedAt } from './pcInventory';
+import { parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
 
 // 取自實際試算表的欄位（欄位格式不可更動）
 const HEADERS = ['最後更新時間', '設備識別碼', '電腦名稱', '內網IPv4', 'CPU', ''];
@@ -67,6 +67,45 @@ describe('filterPcRows', () => {
   });
   it('查無資料回傳空陣列', () => {
     expect(filterPcRows(rows, '不存在的東西')).toHaveLength(0);
+  });
+});
+
+describe('makeFieldGetter', () => {
+  // 'Windows' 與 'Windows版本' 並存，用來驗證精準比對優先
+  const headers = ['電腦名稱', 'CPU', 'Windows版本', 'Windows', ''];
+  const row = ['LAB-PC-01', 'i5-6500', '10.0.26100', 'Windows 11 Pro', '帳密'];
+
+  it('依欄位名取值，不受欄位順序影響', () => {
+    const get = makeFieldGetter(headers);
+    expect(get(row, '電腦名稱')).toBe('LAB-PC-01');
+    expect(get(row, 'CPU')).toBe('i5-6500');
+  });
+  it('精準比對優先於包含比對', () => {
+    const get = makeFieldGetter(headers);
+    expect(get(row, 'Windows')).toBe('Windows 11 Pro');
+    expect(get(row, 'Windows版本')).toBe('10.0.26100');
+  });
+  it('沒有精準match時退回包含比對', () => {
+    const get = makeFieldGetter(['最後更新時間', 'CPU']);
+    expect(get(['2026-09-01', 'i5'], '最後更新')).toBe('2026-09-01');
+  });
+  it('找不到欄位回空字串', () => {
+    expect(makeFieldGetter(headers)(row, '不存在')).toBe('');
+  });
+});
+
+describe('restFields', () => {
+  const headers = ['電腦名稱', 'CPU', 'BIOS序號', '備用'];
+  const row = ['LAB-PC-01', 'i5-6500', 'ABC123', ''];
+
+  it('排除已使用的欄位', () => {
+    expect(restFields(headers, row, ['電腦名稱', 'CPU'])).toEqual([
+      { label: 'BIOS序號', value: 'ABC123' },
+    ]);
+  });
+  it('略過空值欄位', () => {
+    const out = restFields(headers, row, []);
+    expect(out.map(f => f.label)).not.toContain('備用');
   });
 });
 

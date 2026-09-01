@@ -34,13 +34,14 @@ import {
   MousePointerClick, Timer, ShoppingCart, Minus, ArrowUpDown,
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
   FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut,
-  Key, GripHorizontal, Grid3x3, PackageOpen
+  Key, GripHorizontal, Grid3x3, PackageOpen,
+  Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
-import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt } from './pcInventory';
+import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
 import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
@@ -387,6 +388,93 @@ const CabinetGrid = ({ grid, cols, selectedSlot, onSelect, statusFilter = 'all' 
     </div>
   </div>
 );
+
+// --- 元件：電腦盤點卡片（重點規格一目了然，展開可看試算表的所有欄位） ---
+// 卡片主要顯示的欄位名稱；其餘欄位在展開時逐項列出，確保不漏資料
+const PC_CARD_FIELDS = ['電腦名稱', '電腦廠牌', '電腦型號', 'CPU', 'GPU', 'VRAM', 'RAM總容量(GB)', 'RAM條數', 'RAM速度(MT/s)', '磁碟', '內網IPv4', 'Windows', '最後更新時間'];
+
+const PcCard = ({ headers, row }) => {
+  const [open, setOpen] = useState(false);
+  const get = makeFieldGetter(headers);
+
+  const name = get(row, '電腦名稱') || get(row, '設備識別碼') || '未命名電腦';
+  const brand = [get(row, '電腦廠牌'), get(row, '電腦型號')].filter(Boolean).join(' ');
+  const cpu = get(row, 'CPU');
+  const gpu = get(row, 'GPU');
+  const vram = get(row, 'VRAM');
+  const ramGB = get(row, 'RAM總容量(GB)');
+  const ramCount = get(row, 'RAM條數');
+  const ramSpeed = get(row, 'RAM速度(MT/s)');
+  const disks = get(row, '磁碟');
+  const ip = get(row, '內網IPv4');
+  const win = get(row, 'Windows').replace('Microsoft ', '');
+  const updated = get(row, '最後更新時間');
+  const rest = restFields(headers, row, PC_CARD_FIELDS);
+
+  const ramText = [ramGB && `${ramGB} GB`, ramCount && `${ramCount} 條`, ramSpeed && `${ramSpeed} MT/s`].filter(Boolean).join(' · ');
+  const gpuText = [gpu, vram && vram !== '-' && `(${vram})`].filter(Boolean).join(' ');
+
+  const Spec = ({ icon: Icon, label, value, tone = 'text-slate-600' }) => (
+    <div className="flex items-start gap-2 min-w-0">
+      <Icon className={`w-4 h-4 flex-shrink-0 mt-0.5 ${tone}`} />
+      <div className="min-w-0">
+        <p className="text-[10px] text-slate-400 font-bold leading-none mb-0.5">{label}</p>
+        <p className="text-xs text-slate-700 font-medium break-words leading-snug" title={value}>{value || '—'}</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md hover:border-teal-300 transition-all flex flex-col">
+      {/* 標題列 */}
+      <div className="p-4 pb-3 border-b border-slate-100">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="font-bold text-slate-800 text-base break-words leading-tight">{name}</h3>
+            {brand && <p className="text-xs text-slate-400 mt-0.5 break-words">{brand}</p>}
+          </div>
+          {win && <span className="flex-shrink-0 px-2 py-1 rounded-lg bg-slate-100 text-slate-600 text-[10px] font-bold whitespace-nowrap">{win}</span>}
+        </div>
+      </div>
+
+      {/* 重點規格 */}
+      <div className="p-4 grid grid-cols-2 gap-x-3 gap-y-3 flex-1">
+        <Spec icon={Cpu} label="CPU" value={cpu} tone="text-blue-500" />
+        <Spec icon={Monitor} label="顯示卡" value={gpuText} tone="text-emerald-500" />
+        <Spec icon={MemoryStick} label="記憶體" value={ramText} tone="text-purple-500" />
+        <Spec icon={Network} label="內網 IP" value={ip} tone="text-amber-500" />
+        <div className="col-span-2">
+          <Spec icon={HardDrive} label="磁碟" value={disks} tone="text-slate-500" />
+        </div>
+      </div>
+
+      {/* 展開全部欄位 */}
+      {rest.length > 0 && (
+        <div className={`border-t border-slate-100 ${open ? 'bg-slate-50/60' : ''}`}>
+          <button onClick={() => setOpen(o => !o)} className="w-full px-4 py-2 flex items-center justify-center gap-1 text-[11px] font-bold text-slate-400 hover:text-teal-600 transition-colors">
+            {open ? <>收合詳細資料 <ChevronUp className="w-3.5 h-3.5"/></> : <>查看其餘 {rest.length} 個欄位 <ChevronDown className="w-3.5 h-3.5"/></>}
+          </button>
+          {open && (
+            <dl className="px-4 pb-3 space-y-1.5 animate-in fade-in duration-200">
+              {rest.map((f, i) => (
+                <div key={i} className="flex gap-2 text-xs">
+                  <dt className="text-slate-400 font-bold w-28 flex-shrink-0 break-words">{f.label || '（未命名）'}</dt>
+                  <dd className="text-slate-700 min-w-0 break-words whitespace-pre-line">{f.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      )}
+
+      {updated && (
+        <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 text-[10px] text-slate-400 flex items-center gap-1">
+          <Clock className="w-3 h-3"/> 更新於 {updated}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // --- 元件：櫃位選擇彈窗（縮小版櫃位圖；已有設備的格子仍可選，同格可放多樣設備） ---
 const SlotPickerModal = ({ isOpen, onClose, grid, cols, currentSlot, editItemId, onPick }) => {
@@ -3040,43 +3128,24 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* 資料表：欄位完全依試算表原樣 */}
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                  {pcError ? (
-                    <div className="p-8 text-center">
-                      <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-rose-400"/>
-                      <p className="text-sm text-rose-600 font-medium mb-1">{pcError}</p>
-                      <button onClick={loadPcInventory} className="mt-3 px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-bold hover:bg-slate-800">重試</button>
-                    </div>
-                  ) : pcLoading && pcData.rows.length === 0 ? (
-                    <p className="p-12 text-center text-slate-400 animate-pulse">讀取試算表中…</p>
-                  ) : visibleRows.length === 0 ? (
-                    <p className="p-12 text-center text-slate-400">{pcData.rows.length === 0 ? '試算表目前沒有資料' : '找不到符合的電腦'}</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm whitespace-nowrap">
-                        <thead className="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0">
-                          <tr>
-                            {pcData.headers.map((h, i) => (
-                              <th key={i} className="p-3 font-semibold text-left border-b border-slate-100">{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {visibleRows.map((row, ri) => (
-                            <tr key={ri} className="hover:bg-slate-50/70 transition-colors">
-                              {row.map((v, ci) => (
-                                <td key={ci} className={`p-3 align-top ${ci === 0 ? 'text-slate-400 font-mono text-xs' : 'text-slate-700'}`} title={v}>
-                                  <span className="block max-w-[280px] truncate">{v || <span className="text-slate-300">—</span>}</span>
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
+                {/* 卡片列表：重點規格一目了然，展開可看試算表的所有欄位 */}
+                {pcError ? (
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
+                    <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-rose-400"/>
+                    <p className="text-sm text-rose-600 font-medium mb-1">{pcError}</p>
+                    <button onClick={loadPcInventory} className="mt-3 px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-bold hover:bg-slate-800">重試</button>
+                  </div>
+                ) : pcLoading && pcData.rows.length === 0 ? (
+                  <p className="bg-white rounded-2xl shadow-sm border border-slate-100 p-12 text-center text-slate-400 animate-pulse">讀取試算表中…</p>
+                ) : visibleRows.length === 0 ? (
+                  <p className="bg-white rounded-2xl shadow-sm border border-slate-100 p-12 text-center text-slate-400">{pcData.rows.length === 0 ? '試算表目前沒有資料' : '找不到符合的電腦'}</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
+                    {visibleRows.map((row, ri) => (
+                      <PcCard key={ri} headers={pcData.headers} row={row} />
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })()}

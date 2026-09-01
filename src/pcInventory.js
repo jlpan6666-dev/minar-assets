@@ -50,6 +50,26 @@ export const filterPcRows = (rows, term) => {
   return rows.filter(r => r.some(v => v.toLowerCase().includes(q)));
 };
 
+// 依「欄位名稱」取值（而非固定索引），這樣試算表調整欄位順序也不會錯位
+// 先精準比對，找不到再退回包含比對；都沒有則回空字串
+export const makeFieldGetter = (headers) => {
+  const exact = new Map();
+  headers.forEach((h, i) => { if (!exact.has(clean(h))) exact.set(clean(h), i); });
+  return (row, name) => {
+    let idx = exact.has(name) ? exact.get(name) : -1;
+    if (idx < 0) idx = headers.findIndex(h => clean(h).includes(name));
+    return idx >= 0 ? clean(row[idx]) : '';
+  };
+};
+
+// 卡片主要欄位以外的其他欄位（展開時逐項列出，確保不漏資料）
+export const restFields = (headers, row, usedNames) => {
+  const used = new Set(usedNames);
+  return headers
+    .map((h, i) => ({ label: clean(h), value: clean(row[i]) }))
+    .filter(f => !used.has(f.label) && f.value !== '');
+};
+
 // 找出「最後更新時間」欄的最大值，供畫面顯示資料新舊
 export const latestUpdatedAt = (headers, rows) => {
   const idx = headers.findIndex(h => h.includes('最後更新'));
