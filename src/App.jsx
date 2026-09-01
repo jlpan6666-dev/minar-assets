@@ -1693,6 +1693,23 @@ export default function App() {
   // 🟢 櫃位圖：網格尺寸自動撐大以容納所有已使用的櫃位，不需另設定
   const cabinetSize = useMemo(() => fitGridSize(itemsList, { cols: DEFAULT_COLS, rows: DEFAULT_ROWS }), [itemsList]);
   const cabinetGrid = useMemo(() => buildGrid(itemsList, cabinetSize), [itemsList, cabinetSize]);
+
+  // 🟢 設備表單的櫃位下拉選單：空位優先，已有設備的櫃位另外分組（仍可選，允許同格放多樣設備）
+  const slotOptions = useMemo(() => {
+    const currentSlot = normalizeSlot(equipForm.cabinet);
+    const empty = [];
+    const occupied = [];
+    cabinetGrid.forEach(cell => {
+      // 編輯中的設備自己佔的格子，視同它的目前位置
+      const othersHere = cell.items.filter(i => i.id !== editItem?.id);
+      if (othersHere.length === 0) empty.push({ slot: cell.slot, label: cell.slot });
+      else occupied.push({ slot: cell.slot, label: `${cell.slot}｜${othersHere[0].name}${othersHere.length > 1 ? ` +${othersHere.length - 1}` : ''}` });
+    });
+    // 目前值若超出網格範圍（例如手動改過資料），仍要能顯示出來
+    const known = new Set([...empty, ...occupied].map(o => o.slot));
+    if (currentSlot && !known.has(currentSlot)) empty.unshift({ slot: currentSlot, label: currentSlot });
+    return { empty, occupied };
+  }, [cabinetGrid, editItem, equipForm.cabinet]);
   const cabinetCounts = useMemo(() => countByStatus(cabinetGrid), [cabinetGrid]);
   const cabinetUnassigned = useMemo(() => unassignedItems(itemsList), [itemsList]);
   const selectedCell = useMemo(() => cabinetGrid.find(c => c.slot === selectedSlot) || null, [cabinetGrid, selectedSlot]);
@@ -3291,8 +3308,20 @@ export default function App() {
                     {/* 🟢 櫃位：對應櫃位圖上的格子 */}
                     <div>
                       <label className="text-sm font-bold text-slate-700 mb-1 block">櫃位 (非必填)</label>
-                      <input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none text-sm uppercase" value={equipForm.cabinet} onChange={e=>setEquipForm({...equipForm, cabinet:e.target.value})} placeholder="例如 A1、C7"/>
-                      <p className="text-xs text-slate-400 mt-1">格式為「欄字母 + 列數字」，填了才會顯示在櫃位圖上{equipForm.cabinet && !normalizeSlot(equipForm.cabinet) && <span className="text-rose-500 font-bold">（目前格式無效，將視為未配置）</span>}</p>
+                      <select className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none bg-white text-sm" value={normalizeSlot(equipForm.cabinet)} onChange={e=>setEquipForm({...equipForm, cabinet:e.target.value})}>
+                        <option value="">未配置櫃位</option>
+                        {slotOptions.empty.length > 0 && (
+                          <optgroup label={`空位（${slotOptions.empty.length}）`}>
+                            {slotOptions.empty.map(o => <option key={o.slot} value={o.slot}>{o.label}</option>)}
+                          </optgroup>
+                        )}
+                        {slotOptions.occupied.length > 0 && (
+                          <optgroup label={`已有設備（${slotOptions.occupied.length}）`}>
+                            {slotOptions.occupied.map(o => <option key={o.slot} value={o.slot}>{o.label}</option>)}
+                          </optgroup>
+                        )}
+                      </select>
+                      <p className="text-xs text-slate-400 mt-1">選「空位」即可；選已有設備的櫃位代表同格放多樣設備</p>
                     </div>
                     <div><label className="text-sm font-bold text-slate-700 mb-1 block">備註</label><input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none text-sm" value={equipForm.note} onChange={e=>setEquipForm({...equipForm, note:e.target.value})}/></div>
                     </>
