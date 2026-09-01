@@ -40,6 +40,7 @@ import {
 import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
+import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt } from './pcInventory';
 import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
@@ -850,6 +851,12 @@ export default function App() {
   // 🟢 首頁櫃位圖：桌機直接在首頁展開詳細，手機（無空間並排）改為跳到櫃位圖頁
   const [homeSelectedSlot, setHomeSelectedSlot] = useState(null);
   const [isSlotPickerOpen, setIsSlotPickerOpen] = useState(false); // 設備表單的櫃位選擇彈窗
+
+  // 🟢 電腦盤點（Google 試算表唯讀鏡像）
+  const [pcData, setPcData] = useState({ headers: [], rows: [] });
+  const [pcLoading, setPcLoading] = useState(false);
+  const [pcError, setPcError] = useState('');
+  const [pcSearch, setPcSearch] = useState('');
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
   
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -1162,6 +1169,27 @@ export default function App() {
   }, [user, appMode, currentSession, isLab, colItemsName, reloadKey, onListenerError]);
 
   const showToast = (msg, type='success') => setToast({message: msg, type});
+
+  // 🟢 讀取電腦盤點試算表（唯讀鏡像；欄位完全依試算表原樣呈現）
+  const loadPcInventory = useCallback(async () => {
+    setPcLoading(true);
+    setPcError('');
+    try {
+      const res = await fetch(`${PC_SHEET_CSV_URL}&_=${Date.now()}`); // 加時間戳避開快取
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setPcData(parsePcRows(parseCSV(await res.text())));
+    } catch (e) {
+      console.error(e);
+      setPcError('無法讀取試算表。請確認試算表的共用設定為「知道連結的任何人」可檢視，或稍後再試。');
+    } finally {
+      setPcLoading(false);
+    }
+  }, []);
+
+  // 進入「電腦盤點」頁時載入一次
+  useEffect(() => {
+    if (viewMode === 'pc-inventory') loadPcInventory();
+  }, [viewMode, loadPcInventory]);
 
   // 🟢 監聽失敗不再靜靜吞掉：Firestore 的 onSnapshot 一旦錯誤就永久停止推送，
   // 沒有錯誤處理時畫面看起來就只是「沒有資料」，而且只能重新整理頁面才會恢復
@@ -2338,6 +2366,7 @@ export default function App() {
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <button onClick={() => { setViewMode('dashboard'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'dashboard' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Home className="w-5 h-5" /> 首頁概覽</button>
           <button onClick={() => { setViewMode('sessions'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'sessions' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><FolderOpen className="w-5 h-5" /> {isLab ? '版次總覽' : '清單總覽'}</button>
+          {isLab && <button onClick={() => { setViewMode('pc-inventory'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'pc-inventory' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Monitor className="w-5 h-5" /> 電腦盤點</button>}
           {isLab && <button onClick={() => { setViewMode('categories'); setCurrentSession(null); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'categories' ? 'bg-white/20 text-white shadow-lg font-bold' : 'hover:bg-white/10 text-slate-300'}`}><Settings className="w-5 h-5" /> 全域分類設定</button>}
           
           {currentSession && (
@@ -2368,6 +2397,7 @@ export default function App() {
                   <h2 className="text-lg md:text-2xl font-bold text-slate-800 truncate max-w-[200px] md:max-w-md">
                     {viewMode === 'sessions' && (isLab ? '版次管理' : freeFormSession ? '清單管理' : '年度盤點清單')}
                     {viewMode === 'categories' && '分類設定'}
+                    {viewMode === 'pc-inventory' && '電腦盤點'}
                     {viewMode === 'dashboard' && '首頁概覽'}
                     {currentSession && viewMode === 'items' && currentSession.name}
                     {currentSession && viewMode === 'borrow-request' && `${currentSession.name} - 借用登記`}
@@ -2963,6 +2993,93 @@ export default function App() {
               )}
             </div>
           )}
+
+          {/* 🟢 電腦盤點 View（LAB ONLY）：Google 試算表唯讀鏡像 + 掃描工具下載 */}
+          {isLab && viewMode === 'pc-inventory' && (() => {
+            const visibleRows = filterPcRows(pcData.rows, pcSearch);
+            const updatedAt = latestUpdatedAt(pcData.headers, pcData.rows);
+            return (
+              <div className="max-w-7xl mx-auto animate-in fade-in duration-300 space-y-4">
+                {/* 說明卡：資料來源與掃描工具 */}
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2 mb-1">
+                        <Monitor className="w-5 h-5 text-teal-600"/> 電腦盤點
+                      </h3>
+                      <p className="text-sm text-slate-500">
+                        資料來源為 Google 試算表，系統端<span className="font-bold text-slate-700">僅供檢視</span>；
+                        要新增或修改請前往試算表。
+                      </p>
+                      {updatedAt && <p className="text-xs text-slate-400 mt-1 flex items-center gap-1"><Clock className="w-3 h-3"/> 資料最後更新：{updatedAt}</p>}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <a href={SCAN_TOOL_PATH} download={SCAN_TOOL_FILENAME} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95 text-sm font-bold">
+                        <FileDown className="w-4 h-4 text-teal-600"/> 下載掃描工具
+                      </a>
+                      <a href={PC_SHEET_EDIT_URL} target="_blank" rel="noopener noreferrer" className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-sm transition-all active:scale-95 text-sm font-bold">
+                        <FileSpreadsheet className="w-4 h-4"/> 前往試算表編輯
+                      </a>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-slate-100 flex items-start gap-2 text-xs text-slate-500">
+                    <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5"/>
+                    <p>在要盤點的電腦上執行「下載掃描工具」取得的 .bat（需以系統管理員身分執行較完整），掃描結果會自動寫回試算表，回到此頁按重新整理即可看到。</p>
+                  </div>
+                </div>
+
+                {/* 搜尋與重新整理 */}
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-3 flex items-center gap-2 flex-wrap">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                    <input value={pcSearch} onChange={e => setPcSearch(e.target.value)} placeholder="搜尋電腦名稱、IP、序號、CPU…" className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-slate-50 focus:bg-white transition-colors text-sm"/>
+                  </div>
+                  <span className="text-xs text-slate-500 font-bold px-2">{visibleRows.length} / {pcData.rows.length} 台</span>
+                  <button onClick={loadPcInventory} disabled={pcLoading} className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm transition-all active:scale-95 text-sm font-bold disabled:opacity-50">
+                    <Activity className={`w-4 h-4 text-teal-600 ${pcLoading ? 'animate-pulse' : ''}`}/> {pcLoading ? '讀取中…' : '重新整理'}
+                  </button>
+                </div>
+
+                {/* 資料表：欄位完全依試算表原樣 */}
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                  {pcError ? (
+                    <div className="p-8 text-center">
+                      <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-rose-400"/>
+                      <p className="text-sm text-rose-600 font-medium mb-1">{pcError}</p>
+                      <button onClick={loadPcInventory} className="mt-3 px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-bold hover:bg-slate-800">重試</button>
+                    </div>
+                  ) : pcLoading && pcData.rows.length === 0 ? (
+                    <p className="p-12 text-center text-slate-400 animate-pulse">讀取試算表中…</p>
+                  ) : visibleRows.length === 0 ? (
+                    <p className="p-12 text-center text-slate-400">{pcData.rows.length === 0 ? '試算表目前沒有資料' : '找不到符合的電腦'}</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm whitespace-nowrap">
+                        <thead className="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0">
+                          <tr>
+                            {pcData.headers.map((h, i) => (
+                              <th key={i} className="p-3 font-semibold text-left border-b border-slate-100">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {visibleRows.map((row, ri) => (
+                            <tr key={ri} className="hover:bg-slate-50/70 transition-colors">
+                              {row.map((v, ci) => (
+                                <td key={ci} className={`p-3 align-top ${ci === 0 ? 'text-slate-400 font-mono text-xs' : 'text-slate-700'}`} title={v}>
+                                  <span className="block max-w-[280px] truncate">{v || <span className="text-slate-300">—</span>}</span>
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* 🟢 櫃位圖 View（LAB ONLY）：左側抽屜網格 + 右側詳細資訊面板 */}
           {isLab && viewMode === 'cabinet' && currentSession && (
