@@ -35,7 +35,7 @@ import {
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
   FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut,
   Key, GripHorizontal, Grid3x3, PackageOpen,
-  Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp
+  Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp, Rocket, ExternalLink
 } from 'lucide-react';
 
 import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
@@ -76,7 +76,9 @@ const DEFAULT_LAB_SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${LAB_
 const SYSTEM_CONFIGS = [
   { id: 'lab', name: '實驗室設備管理', icon: Beaker, pwd: 'minar7917', colorClass: 'bg-teal-600', hoverClass: 'hover:bg-teal-700', textClass: 'text-teal-600' },
   { id: 'property_jl', name: '建良老師設備管理', icon: Box, pwd: 'jlpan@314', colorClass: 'bg-blue-600', hoverClass: 'hover:bg-blue-700', textClass: 'text-blue-600' },
-  { id: 'property_kung', name: '龔老師財產盤點', icon: Box, pwd: 'kung7917', colorClass: 'bg-indigo-600', hoverClass: 'hover:bg-indigo-700', textClass: 'text-indigo-600' }
+  { id: 'property_kung', name: '龔老師財產盤點', icon: Box, pwd: 'kung7917', colorClass: 'bg-indigo-600', hoverClass: 'hover:bg-indigo-700', textClass: 'text-indigo-600' },
+  // 🟢 外部系統：不進入本系統，直接開新分頁（有自己的登入，僅限校內網路）
+  { id: 'projects', name: '歷屆專案系統', icon: Rocket, externalUrl: 'http://140.127.22.162:8088', hint: '私有部署平台', notice: '僅限校內網路連線', colorClass: 'bg-purple-600', hoverClass: 'hover:bg-purple-700', textClass: 'text-purple-600' }
 ];
 
 // --- 🟢 Google 授權設定 ---
@@ -833,23 +835,41 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, access, membersLoaded, 
           </p>
         </div>
 
-        {!selectedSys ? (
-          <div className={`grid grid-cols-1 gap-6 ${access.systems.length >= 3 ? 'md:grid-cols-3' : access.systems.length === 2 ? 'md:grid-cols-2 max-w-2xl mx-auto' : 'max-w-sm mx-auto'}`}>
-            {SYSTEM_CONFIGS.filter(sys => access.systems.includes(sys.id)).map(sys => {
+        {!selectedSys ? (() => {
+          // 外部系統（有自己的登入）一律顯示；本系統各模組依成員權限過濾
+          const visibleSystems = SYSTEM_CONFIGS.filter(sys => sys.externalUrl || access.systems.includes(sys.id));
+          // 卡片數決定欄數：4 張排成 2×2 比落單一張好看
+          const n = visibleSystems.length;
+          const cols = n >= 5 ? 'md:grid-cols-2 xl:grid-cols-3'
+            : n === 4 ? 'md:grid-cols-2 max-w-3xl mx-auto'
+            : n === 3 ? 'md:grid-cols-3'
+            : n === 2 ? 'md:grid-cols-2 max-w-2xl mx-auto'
+            : 'max-w-sm mx-auto';
+          return (
+          <div className={`grid grid-cols-1 gap-6 ${cols}`}>
+            {visibleSystems.map(sys => {
               const Icon = sys.icon;
               const direct = sys.id === 'property_jl'; // 🟢 建良老師系統：成員免密碼直接進入
+              const openExternal = () => window.open(sys.externalUrl, '_blank', 'noopener,noreferrer');
               return (
-                <div key={sys.id} onClick={() => direct ? enterDirect(sys.id) : setSelectedSystem(sys)} className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:-translate-y-2 transition-all group flex flex-col items-center text-center">
+                <div key={sys.id} onClick={() => sys.externalUrl ? openExternal() : direct ? enterDirect(sys.id) : setSelectedSystem(sys)} className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:-translate-y-2 transition-all group flex flex-col items-center text-center relative">
+                  {sys.externalUrl && <ExternalLink className="w-4 h-4 text-slate-300 absolute top-4 right-4 group-hover:text-slate-500 transition-colors" />}
                   <div className={`w-20 h-20 rounded-2xl flex items-center justify-center mb-6 shadow-md transition-transform group-hover:scale-110 ${sys.colorClass}`}>
                     <Icon className="w-10 h-10 text-white" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800 mb-2">{sys.name}</h3>
-                  <p className="text-sm text-slate-400">{direct ? '點擊直接進入 (成員已驗證)' : '點擊進入登入頁面'}</p>
+                  <p className="text-sm text-slate-400">{sys.externalUrl ? '點擊另開分頁' : direct ? '點擊直接進入 (成員已驗證)' : '點擊進入登入頁面'}{sys.hint && ` · ${sys.hint}`}</p>
+                  {sys.notice && (
+                    <span className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold">
+                      <AlertTriangle className="w-3.5 h-3.5"/> {sys.notice}
+                    </span>
+                  )}
                 </div>
               );
             })}
           </div>
-        ) : (
+          );
+        })() : (
           <div className="max-w-md mx-auto bg-white rounded-2xl shadow-xl overflow-hidden p-8 animate-in zoom-in-95 duration-300">
             <button onClick={() => {setSelectedSystem(null); setPassword(''); setError('');}} className="text-sm text-slate-400 hover:text-slate-700 flex items-center gap-1 mb-6 transition-colors">
               <ChevronLeft className="w-4 h-4"/> 返回選擇系統
