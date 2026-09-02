@@ -184,6 +184,13 @@ describe('callPerfApi 重試策略', () => {
     expect(calls).toBe(1);
   });
 
+  it('刪除絕不重試（重編號後列號會位移，重試可能誤刪別筆）', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls += 1; return reply(404); });
+    await expect(callPerfApi({ action: 'delete' })).rejects.toThrow('HTTP 404');
+    expect(calls).toBe(1);
+  });
+
   it('權限或憑證錯誤不重試，直接回報原訊息', async () => {
     let calls = 0;
     vi.stubGlobal('fetch', async () => { calls += 1; return reply(200, { ok: false, error: '此帳號沒有這份試算表的編輯權限。' }); });

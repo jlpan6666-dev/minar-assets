@@ -411,6 +411,22 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
   const [editing, setEditing] = useState(null); // { rowNumber: null 代表新增, cells: [] }
   const [saving, setSaving] = useState(false);
   const [copiedRow, setCopiedRow] = useState(null); // 剛複製成功的列，用來短暫顯示勾勾
+  const [deleting, setDeleting] = useState(null);   // 待確認刪除的列（刪除不可逆，一律先確認）
+
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    const row = deleting;
+    setDeleting(null);
+    try {
+      const idToken = await user.getIdToken();
+      const data = await callPerfApi({ action: 'delete', idToken, sheet: activeSheet, rowNumber: row.rowNumber });
+      setTable(parseSheetTable(data.values));
+      showToast('已刪除');
+    } catch (err) {
+      console.error(err);
+      showToast(err.message, 'error');
+    }
+  };
 
   const copyRow = async (row) => {
     const text = rowToText(row.cells);
@@ -590,9 +606,14 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
                     {copiedRow === row.rowNumber ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4"/>}
                   </button>
                   {canEdit && (
-                    <button onClick={() => setEditing({ rowNumber: row.rowNumber, cells: [...row.cells] })} className="p-1.5 rounded-lg text-slate-300 hover:text-amber-700 hover:bg-amber-100 transition-colors" title="編輯">
-                      <Edit2 className="w-4 h-4"/>
-                    </button>
+                    <>
+                      <button onClick={() => setEditing({ rowNumber: row.rowNumber, cells: [...row.cells] })} className="p-1.5 rounded-lg text-slate-300 hover:text-amber-700 hover:bg-amber-100 transition-colors" title="編輯">
+                        <Edit2 className="w-4 h-4"/>
+                      </button>
+                      <button onClick={() => setDeleting(row)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors" title="刪除此列">
+                        <Trash2 className="w-4 h-4"/>
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -602,6 +623,16 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
 
         <p className="text-xs text-slate-400 text-center pt-2">資料來源為 Google 試算表</p>
       </main>
+
+      {/* 刪除確認：試算表的刪除無法復原，一律先確認 */}
+      <ConfirmModal
+        isOpen={!!deleting}
+        title="確定刪除這一筆？"
+        message={deleting ? `${rowToText(deleting.cells).slice(0, 60)}${rowToText(deleting.cells).length > 60 ? '…' : ''}\n\n此操作會直接從試算表移除，無法復原。` : ''}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleting(null)}
+        isDangerous
+      />
 
       {/* 新增／編輯視窗：欄位依該張工作表的表頭動態產生 */}
       {editing && (

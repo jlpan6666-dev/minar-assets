@@ -75,13 +75,16 @@ function doPost(e) {
       if (!values.length) return json({ ok: false, error: '沒有要寫入的內容。' });
       if (!values.join('').replace(/\s/g, '')) return json({ ok: false, error: '內容不可全部空白。' });
 
+      // 異動前先判斷第一欄是否為流水號，異動後才知道要不要重編
+      var wasSequence = isSequenceColumn(sheet);
+
       if (req.rowNumber) {
         sheet.getRange(Number(req.rowNumber), 1, 1, values.length).setValues([values]);
       } else if (req.insertTop) {
-        // 最新的排最前面：插在表頭下方，再把流水號重編為 1,2,3…
+        // 最新的排最前面：插在表頭下方
         sheet.insertRowBefore(2);
         sheet.getRange(2, 1, 1, values.length).setValues([values]);
-        renumberIfSequence(sheet);
+        if (wasSequence) renumberAll(sheet);
       } else {
         sheet.appendRow(values);
       }
@@ -92,6 +95,26 @@ function doPost(e) {
       });
     }
 
+    if (req.action === 'delete') {
+      if (!canEdit) return json({ ok: false, error: '此帳號沒有這份試算表的編輯權限。' });
+      if (!req.sheet || names.indexOf(req.sheet) < 0) return json({ ok: false, error: '找不到工作表：' + req.sheet });
+
+      var target = book.getSheetByName(req.sheet);
+      var rowNumber = Number(req.rowNumber);
+      if (!rowNumber || rowNumber < 2 || rowNumber > target.getLastRow()) {
+        return json({ ok: false, error: '要刪除的列不存在（可能已被其他人異動，請重新整理）。' });
+      }
+
+      var wasSeq = isSequenceColumn(target);
+      target.deleteRow(rowNumber);
+      if (wasSeq) renumberAll(target);
+      SpreadsheetApp.flush();
+      return json({
+        ok: true, version: 3, email: email, canEdit: true,
+        sheets: names, sheet: req.sheet, values: readAll(target)
+      });
+    }
+
     return json({ ok: false, error: '未知的操作：' + req.action });
   } catch (err) {
     return json({ ok: false, error: String(err) });
@@ -99,22 +122,26 @@ function doPost(e) {
 }
 
 /**
- * 若第一欄原本是 1,2,3… 的連續流水號，就重編為 1..N（新插入的那列變成 1）。
- * 條件訂得嚴格：插入後第 3 列起必須恰好是舊的 1,2,3…；
- * 否則（例如「歷屆碩士畢業論文」第一欄是年度 90,91…）完全不動，避免覆蓋資料。
+ * 第一欄是否為 1,2,3… 的連續流水號。
+ * 條件訂得嚴格（必須從 1 開始且完全連續），否則像「歷屆碩士畢業論文」第一欄是
+ * 年度 90,91…，誤判會把年度覆蓋掉。務必在異動資料「之前」呼叫。
  */
-function renumberIfSequence(sheet) {
+function isSequenceColumn(sheet) {
   var last = sheet.getLastRow();
-  if (last < 3) return; // 只有表頭與剛插入的那列，沒有舊資料可判斷
-
-  var oldCount = last - 2;
-  var old = sheet.getRange(3, 1, oldCount, 1).getDisplayValues();
-  for (var i = 0; i < oldCount; i++) {
-    if (String(old[i][0]).trim() !== String(i + 1)) return; // 不是連續流水號就不動
+  if (last < 2) return false;
+  var col = sheet.getRange(2, 1, last - 1, 1).getDisplayValues();
+  for (var i = 0; i < col.length; i++) {
+    if (String(col[i][0]).trim() !== String(i + 1)) return false;
   }
+  return true;
+}
 
+/** 把第一欄重編為 1..N（插入或刪除後呼叫） */
+function renumberAll(sheet) {
+  var last = sheet.getLastRow();
+  if (last < 2) return;
   var nums = [];
-  for (var j = 0; j < last - 1; j++) nums.push([j + 1]);
+  for (var i = 0; i < last - 1; i++) nums.push([i + 1]);
   sheet.getRange(2, 1, last - 1, 1).setValues(nums);
 }
 
