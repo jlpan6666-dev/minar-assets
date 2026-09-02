@@ -35,14 +35,14 @@ import {
   Camera, Image as ImageIcon, Upload, CheckSquare, Box, Activity, Home, Hash, Filter,
   FileSpreadsheet, Check, XCircle, ListChecks, Map, Monitor, Server, Printer, ZoomIn, ZoomOut,
   Key, GripHorizontal, Grid3x3, PackageOpen,
-  Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp, Rocket, ExternalLink, Award
+  Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp, Rocket, ExternalLink, Award, Copy
 } from 'lucide-react';
 
 import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
-import { perfCsvUrl, PERF_SHEET_EDIT_URL, isApiConfigured, callPerfApi, parseSheetTable, filterSheetRows, nextRowNumber, groupSheetNames, mainCellIndex } from './performance';
+import { perfCsvUrl, PERF_SHEET_EDIT_URL, isApiConfigured, callPerfApi, parseSheetTable, filterSheetRows, nextRowNumber, groupSheetNames, mainCellIndex, rowToText } from './performance';
 import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
@@ -410,6 +410,20 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
 
   const [editing, setEditing] = useState(null); // { rowNumber: null 代表新增, cells: [] }
   const [saving, setSaving] = useState(false);
+  const [copiedRow, setCopiedRow] = useState(null); // 剛複製成功的列，用來短暫顯示勾勾
+
+  const copyRow = async (row) => {
+    const text = rowToText(row.cells);
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedRow(row.rowNumber);
+      setTimeout(() => setCopiedRow(c => (c === row.rowNumber ? null : c)), 1600);
+    } catch (err) {
+      console.error(err);
+      showToast('瀏覽器不允許複製，請手動選取文字', 'error');
+    }
+  };
 
   const load = useCallback(async (sheetName) => {
     setLoading(true); setError('');
@@ -563,11 +577,17 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
                     );
                   })}
                 </div>
-                {canEdit && (
-                  <button onClick={() => setEditing({ rowNumber: row.rowNumber, cells: [...row.cells] })} className="p-2 h-10 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100" title="編輯">
-                    <Edit2 className="w-4 h-4"/>
+                <div className="flex flex-col gap-1 flex-shrink-0">
+                  {/* 複製：檢視者也用得到，所以常駐顯示 */}
+                  <button onClick={() => copyRow(row)} className={`p-2 rounded-lg transition-colors ${copiedRow === row.rowNumber ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'}`} title="複製此列文字">
+                    {copiedRow === row.rowNumber ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4"/>}
                   </button>
-                )}
+                  {canEdit && (
+                    <button onClick={() => setEditing({ rowNumber: row.rowNumber, cells: [...row.cells] })} className="p-2 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100" title="編輯">
+                      <Edit2 className="w-4 h-4"/>
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

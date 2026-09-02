@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSheetTable, filterSheetRows, nextRowNumber, groupSheetNames, isApiConfigured, perfCsvUrl, mainCellIndex } from './performance';
+import { parseSheetTable, filterSheetRows, nextRowNumber, groupSheetNames, isApiConfigured, perfCsvUrl, mainCellIndex, rowToText } from './performance';
 
 // 取自實際試算表：每張工作表欄位都不同，解析器不能假設欄位
 const 產業績效 = [['案次', ''], ['1', '教育部第四期大學社會責任實踐計畫，經費：3,000,000元/年。'], ['2', '教育部第三期，經費：2,750,000元/年']];
@@ -119,6 +119,22 @@ describe('mainCellIndex 主要內容欄', () => {
   it('只有一欄時回 -1', () => {
     expect(mainCellIndex(['1'])).toBe(-1);
     expect(mainCellIndex([])).toBe(-1);
+  });
+});
+
+describe('rowToText 複製用文字', () => {
+  it('以空格串接各欄', () => {
+    expect(rowToText(['90', '郭福文', '整合與分化式網路'])).toBe('90 郭福文 整合與分化式網路');
+  });
+  it('略過空欄（專利表尾端有多餘空欄）', () => {
+    expect(rowToText(['1', '新型專利', '蟲害預測防治裝置', ''])).toBe('1 新型專利 蟲害預測防治裝置');
+  });
+  it('去除前後空白', () => {
+    expect(rowToText(['  1  ', ' 內容 '])).toBe('1 內容');
+  });
+  it('空列回空字串', () => {
+    expect(rowToText(['', ''])).toBe('');
+    expect(rowToText([])).toBe('');
   });
 });
 

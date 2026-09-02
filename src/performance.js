@@ -54,6 +54,10 @@ export const mainCellIndex = (cells = []) => {
   return rest.reduce((best, c, i) => (c.length > rest[best].length ? i : best), 0);
 };
 
+// 一列 → 可直接貼進文件的純文字：略過空欄，以空格串接
+// 保留第一欄（年度、類別等有時是有意義的資訊；純序號使用者自行刪即可）
+export const rowToText = (cells = []) => cells.map(clean).filter(Boolean).join(' ');
+
 // 關鍵字過濾：任一欄位命中即保留（不分大小寫）
 export const filterSheetRows = (rows, term) => {
   const q = clean(term).toLowerCase();
