@@ -42,7 +42,7 @@ import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } f
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
-import { perfCsvUrl, PERF_SHEET_EDIT_URL, isApiConfigured, callPerfApi, parseSheetTable, filterSheetRows, nextRowNumber, groupSheetNames, mainCellIndex, rowToText } from './performance';
+import { perfCsvUrl, PERF_SHEET_EDIT_URL, isApiConfigured, callPerfApi, parseSheetTable, filterSheetRows, isSequenceColumn, newFirstCell, groupSheetNames, mainCellIndex, rowToText } from './performance';
 import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
@@ -462,6 +462,8 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
       const data = await callPerfApi({
         action: 'save', idToken, sheet: activeSheet,
         rowNumber: editing.rowNumber || null, values: editing.cells,
+        // 流水號表：新增插到最前面並重編號（最新的是 1）；其他表沿用附加到最後
+        insertTop: !editing.rowNumber && isSequenceColumn(table.rows),
       });
       setTable(parseSheetTable(data.values)); // 用回傳的最新內容，省一次往返
       showToast(editing.rowNumber ? '已更新' : '已新增一筆');
@@ -492,7 +494,7 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
               <FileSpreadsheet className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline">試算表</span>
             </a>
             {canEdit && activeSheet && (
-              <button onClick={() => setEditing({ rowNumber: null, cells: Array.from({ length: colCount }, (_, i) => i === 0 ? nextRowNumber(table.rows) : '') })} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-sm text-sm font-bold transition-colors">
+              <button onClick={() => setEditing({ rowNumber: null, cells: Array.from({ length: colCount }, (_, i) => i === 0 ? newFirstCell(table.rows) : '') })} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-sm text-sm font-bold transition-colors">
                 <Plus className="w-4 h-4"/> <span className="hidden sm:inline">新增</span>
               </button>
             )}
@@ -616,9 +618,14 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
               {editing.cells.map((v, i) => {
                 const label = table.headers[i] || `第 ${i + 1} 欄`;
                 const isLong = i === editing.cells.length - 1 || v.length > 60;
+                // 新增到流水號表時，編號由系統重編，不需使用者操心
+                const autoNumbered = i === 0 && !editing.rowNumber && isSequenceColumn(table.rows);
                 return (
                   <div key={i}>
-                    <label className="text-sm font-bold text-slate-700 mb-1 block">{label}</label>
+                    <label className="text-sm font-bold text-slate-700 mb-1 block">
+                      {label}
+                      {autoNumbered && <span className="ml-2 text-xs font-medium text-amber-600">將排在最前面，其餘自動往後遞延</span>}
+                    </label>
                     {isLong ? (
                       <textarea value={v} onChange={e => { const c = [...editing.cells]; c[i] = e.target.value; setEditing({ ...editing, cells: c }); }} rows={6} className="w-full border border-slate-200 rounded-lg p-2.5 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm leading-relaxed"/>
                     ) : (

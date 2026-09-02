@@ -77,6 +77,11 @@ function doPost(e) {
 
       if (req.rowNumber) {
         sheet.getRange(Number(req.rowNumber), 1, 1, values.length).setValues([values]);
+      } else if (req.insertTop) {
+        // 最新的排最前面：插在表頭下方，再把流水號重編為 1,2,3…
+        sheet.insertRowBefore(2);
+        sheet.getRange(2, 1, 1, values.length).setValues([values]);
+        renumberIfSequence(sheet);
       } else {
         sheet.appendRow(values);
       }
@@ -91,6 +96,26 @@ function doPost(e) {
   } catch (err) {
     return json({ ok: false, error: String(err) });
   }
+}
+
+/**
+ * 若第一欄原本是 1,2,3… 的連續流水號，就重編為 1..N（新插入的那列變成 1）。
+ * 條件訂得嚴格：插入後第 3 列起必須恰好是舊的 1,2,3…；
+ * 否則（例如「歷屆碩士畢業論文」第一欄是年度 90,91…）完全不動，避免覆蓋資料。
+ */
+function renumberIfSequence(sheet) {
+  var last = sheet.getLastRow();
+  if (last < 3) return; // 只有表頭與剛插入的那列，沒有舊資料可判斷
+
+  var oldCount = last - 2;
+  var old = sheet.getRange(3, 1, oldCount, 1).getDisplayValues();
+  for (var i = 0; i < oldCount; i++) {
+    if (String(old[i][0]).trim() !== String(i + 1)) return; // 不是連續流水號就不動
+  }
+
+  var nums = [];
+  for (var j = 0; j < last - 1; j++) nums.push([j + 1]);
+  sheet.getRange(2, 1, last - 1, 1).setValues(nums);
 }
 
 /** 讀取整張表（以顯示文字為準，避免日期／數字被轉成物件） */

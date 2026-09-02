@@ -65,11 +65,16 @@ export const filterSheetRows = (rows, term) => {
   return rows.filter(r => r.cells.some(c => c.toLowerCase().includes(q)));
 };
 
-// 新增時自動帶下一個編號（看第一欄的最大數字 +1；非數字則留空）
-export const nextRowNumber = (rows) => {
-  const nums = rows.map(r => parseInt(r.cells[0], 10)).filter(n => !Number.isNaN(n));
-  return nums.length ? String(Math.max(...nums) + 1) : '';
+// 第一欄是否為「1,2,3… 連續流水號」。
+// 只有這種表才適合自動編號與重排——像「歷屆碩士畢業論文」第一欄是年度(90,91…)，
+// 誤判會把年度覆蓋掉，因此條件訂得嚴格：必須從 1 開始且完全連續。
+export const isSequenceColumn = (rows = []) => {
+  if (rows.length === 0) return false;
+  return rows.every((r, i) => String(r.cells?.[0] ?? '').trim() === String(i + 1));
 };
+
+// 新增時第一欄要帶的值：流水號表一律給 1（最新的排最前面），其他表留空由使用者填
+export const newFirstCell = (rows) => (isSequenceColumn(rows) ? '1' : '');
 
 // 工作表名稱以「-」分組，供下拉選單顯示（例：研究著作-專書 → 群組「研究著作」）
 export const groupSheetNames = (names = []) => {

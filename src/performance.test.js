@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { parseSheetTable, filterSheetRows, nextRowNumber, groupSheetNames, isApiConfigured, perfCsvUrl, mainCellIndex, rowToText, callPerfApi } from './performance';
+import { parseSheetTable, filterSheetRows, isSequenceColumn, newFirstCell, groupSheetNames, isApiConfigured, perfCsvUrl, mainCellIndex, rowToText, callPerfApi } from './performance';
 
 // 取自實際試算表：每張工作表欄位都不同，解析器不能假設欄位
 const 產業績效 = [['案次', ''], ['1', '教育部第四期大學社會責任實踐計畫，經費：3,000,000元/年。'], ['2', '教育部第三期，經費：2,750,000元/年']];
@@ -76,15 +76,34 @@ describe('filterSheetRows', () => {
   });
 });
 
-describe('nextRowNumber', () => {
-  it('取第一欄最大數字 +1', () => {
-    expect(nextRowNumber(parseSheetTable(期刊論文).rows)).toBe('3');
+describe('isSequenceColumn 判斷是否為流水號欄', () => {
+  it('1,2,3 連續 → 是', () => {
+    expect(isSequenceColumn(parseSheetTable(期刊論文).rows)).toBe(true);
   });
-  it('第一欄非數字時留空（例如年度以外的表）', () => {
-    expect(nextRowNumber([{ cells: ['附錄'] }])).toBe('');
+  it('年度欄（90,91…）→ 否，避免覆蓋年度', () => {
+    const rows = parseSheetTable([['年度', '姓名'], ['90', '甲'], ['91', '乙']]).rows;
+    expect(isSequenceColumn(rows)).toBe(false);
   });
-  it('空清單留空', () => {
-    expect(nextRowNumber([])).toBe('');
+  it('有跳號 → 否（不確定就不要亂動）', () => {
+    const rows = parseSheetTable([['編號', '名稱'], ['1', 'A'], ['3', 'B']]).rows;
+    expect(isSequenceColumn(rows)).toBe(false);
+  });
+  it('不是從 1 開始 → 否', () => {
+    const rows = parseSheetTable([['編號', '名稱'], ['2', 'A'], ['3', 'B']]).rows;
+    expect(isSequenceColumn(rows)).toBe(false);
+  });
+  it('空清單 → 否', () => {
+    expect(isSequenceColumn([])).toBe(false);
+  });
+});
+
+describe('newFirstCell 新增時的第一欄', () => {
+  it('流水號表給 1（最新的排最前面）', () => {
+    expect(newFirstCell(parseSheetTable(期刊論文).rows)).toBe('1');
+  });
+  it('非流水號表留空讓使用者自己填', () => {
+    const rows = parseSheetTable([['年度', '姓名'], ['90', '甲']]).rows;
+    expect(newFirstCell(rows)).toBe('');
   });
 });
 
