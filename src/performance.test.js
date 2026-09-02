@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { parseSheetTable, filterSheetRows, nextRowNumber, groupSheetNames, isApiConfigured, perfCsvUrl, mainCellIndex, rowToText } from './performance';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { parseSheetTable, filterSheetRows, nextRowNumber, groupSheetNames, isApiConfigured, perfCsvUrl, mainCellIndex, rowToText, callPerfApi } from './performance';
 
 // 取自實際試算表：每張工作表欄位都不同，解析器不能假設欄位
 const 產業績效 = [['案次', ''], ['1', '教育部第四期大學社會責任實踐計畫，經費：3,000,000元/年。'], ['2', '教育部第三期，經費：2,750,000元/年']];
@@ -135,6 +135,49 @@ describe('rowToText 複製用文字', () => {
   it('空列回空字串', () => {
     expect(rowToText(['', ''])).toBe('');
     expect(rowToText([])).toBe('');
+  });
+});
+
+describe('callPerfApi 重試策略', () => {
+  const okBody = { ok: true, values: [['編號', '名稱']] };
+  const reply = (status, body) => ({ ok: status === 200, status, json: async () => body });
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('讀取遇到 404 會自動重試並成功', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls += 1; return calls < 3 ? reply(404) : reply(200, okBody); });
+    await expect(callPerfApi({ action: 'list' })).resolves.toEqual(okBody);
+    expect(calls).toBe(3);
+  });
+
+  it('讀取重試耗盡後才拋錯', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls += 1; return reply(404); });
+    await expect(callPerfApi({ action: 'list' })).rejects.toThrow('HTTP 404');
+    expect(calls).toBe(3); // 首次 + 2 次重試
+  });
+
+  it('寫入絕不重試（避免重複新增）', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls += 1; return reply(404); });
+    await expect(callPerfApi({ action: 'save' })).rejects.toThrow('HTTP 404');
+    expect(calls).toBe(1);
+  });
+
+  it('權限或憑證錯誤不重試，直接回報原訊息', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls += 1; return reply(200, { ok: false, error: '此帳號沒有這份試算表的編輯權限。' }); });
+    await expect(callPerfApi({ action: 'list' })).rejects.toThrow('編輯權限');
+    expect(calls).toBe(1);
+  });
+
+  it('每次請求都帶不同的防快取參數', async () => {
+    const urls = [];
+    vi.stubGlobal('fetch', async (u) => { urls.push(u); return urls.length < 2 ? reply(404) : reply(200, okBody); });
+    await callPerfApi({ action: 'list' });
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).not.toBe(urls[1]);
   });
 });
 

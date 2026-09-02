@@ -86,14 +86,34 @@ export const groupSheetNames = (names = []) => {
 
 // 呼叫 Apps Script。刻意使用 text/plain 以避開 CORS 預檢（preflight）；
 // Apps Script 端讀的是 e.postData.contents，不受 Content-Type 影響。
+//
+// Apps Script 偶發回傳 404/5xx（Google 端暫時性故障）。讀取是冪等的，可安全自動重試；
+// 寫入若重試，可能在「其實已寫入成功但回應失敗」時重複新增一筆，因此一律不重試。
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const isTransient = (e) => /HTTP (404|429|5\d\d)/.test(e.message) || e.name === 'TypeError';
+
 export const callPerfApi = async (payload) => {
-  const res = await fetch(PERF_API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`伺服器回應 HTTP ${res.status}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || '操作失敗');
-  return data;
+  const retries = payload.action === 'list' ? 2 : 0;
+  let lastErr;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // 每次都帶不同的查詢參數，避免瀏覽器重用 Apps Script 的一次性重導向網址
+      const res = await fetch(`${PERF_API_URL}?_=${Date.now()}-${attempt}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        cache: 'no-store',
+      });
+      if (!res.ok) throw new Error(`伺服器回應 HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || '操作失敗'); // 業務錯誤（權限、憑證）不重試
+      return data;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries && isTransient(e)) { await sleep(500 * (attempt + 1)); continue; }
+      throw e;
+    }
+  }
+  throw lastErr;
 };
