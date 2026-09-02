@@ -488,6 +488,9 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            <a href={PERF_SHEET_EDIT_URL} target="_blank" rel="noopener noreferrer" className="bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 shadow-sm text-sm font-bold transition-colors" title="在 Google 試算表開啟">
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600"/> <span className="hidden sm:inline">試算表</span>
+            </a>
             {canEdit && activeSheet && (
               <button onClick={() => setEditing({ rowNumber: null, cells: Array.from({ length: colCount }, (_, i) => i === 0 ? nextRowNumber(table.rows) : '') })} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-sm text-sm font-bold transition-colors">
                 <Plus className="w-4 h-4"/> <span className="hidden sm:inline">新增</span>
@@ -560,11 +563,12 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
         ) : visible.length === 0 ? (
           <p className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">{table.rows.length === 0 ? '此項目尚無資料' : '找不到符合的項目'}</p>
         ) : (
-          <div className="space-y-3">
+          /* 單一容器 + 分隔線的清單：比一列一張卡密實，長清單好掃讀 */
+          <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
             {visible.map(row => (
-              <div key={row.rowNumber} className="bg-white rounded-2xl border border-slate-200 p-4 flex gap-4 hover:border-amber-300 hover:shadow-sm transition-all group">
-                <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 font-bold flex items-center justify-center flex-shrink-0 text-sm">{row.cells[0] || '—'}</div>
-                <div className="flex-1 min-w-0 space-y-1.5">
+              <div key={row.rowNumber} className="flex items-start gap-3 px-4 py-3 hover:bg-amber-50/40 transition-colors group">
+                <span className="mt-0.5 w-7 h-7 rounded-lg bg-slate-100 text-slate-500 text-xs font-bold flex items-center justify-center flex-shrink-0 group-hover:bg-amber-100 group-hover:text-amber-700 transition-colors">{row.cells[0] || '—'}</span>
+                <div className="flex-1 min-w-0 space-y-1">
                   {row.cells.slice(1).map((v, i) => {
                     if (!v) return null;
                     const label = table.headers[i + 1];
@@ -577,13 +581,14 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
                     );
                   })}
                 </div>
-                <div className="flex flex-col gap-1 flex-shrink-0">
+                {/* 水平排列：直排會讓隱藏的編輯鈕仍佔位，把每列撐高 */}
+                <div className="flex items-center gap-0.5 flex-shrink-0">
                   {/* 複製：檢視者也用得到，所以常駐顯示 */}
-                  <button onClick={() => copyRow(row)} className={`p-2 rounded-lg transition-colors ${copiedRow === row.rowNumber ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'}`} title="複製此列文字">
+                  <button onClick={() => copyRow(row)} className={`p-1.5 rounded-lg transition-colors ${copiedRow === row.rowNumber ? 'text-emerald-600 bg-emerald-50' : 'text-slate-300 hover:text-amber-700 hover:bg-amber-100'}`} title="複製此列文字">
                     {copiedRow === row.rowNumber ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4"/>}
                   </button>
                   {canEdit && (
-                    <button onClick={() => setEditing({ rowNumber: row.rowNumber, cells: [...row.cells] })} className="p-2 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100" title="編輯">
+                    <button onClick={() => setEditing({ rowNumber: row.rowNumber, cells: [...row.cells] })} className="p-1.5 rounded-lg text-slate-300 hover:text-amber-700 hover:bg-amber-100 transition-colors" title="編輯">
                       <Edit2 className="w-4 h-4"/>
                     </button>
                   )}
@@ -593,10 +598,7 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
           </div>
         )}
 
-        <p className="text-xs text-slate-400 text-center pt-2">
-          資料來源為 Google 試算表，
-          <a href={PERF_SHEET_EDIT_URL} target="_blank" rel="noopener noreferrer" className="text-amber-600 hover:underline font-medium">於試算表開啟</a>
-        </p>
+        <p className="text-xs text-slate-400 text-center pt-2">資料來源為 Google 試算表</p>
       </main>
 
       {/* 新增／編輯視窗：欄位依該張工作表的表頭動態產生 */}
