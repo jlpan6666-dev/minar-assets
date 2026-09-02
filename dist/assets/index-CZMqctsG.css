@@ -1,0 +1,1 @@
+@keyframes indeterminate-slide{0%{transform:translate(-100%)}to{transform:translate(500%)}}.progress-indeterminate{animation:1.1s cubic-bezier(.4,0,.2,1) infinite indeterminate-slide}.hide-scrollbar{-ms-overflow-style:none;scrollbar-width:none}.hide-scrollbar::-webkit-scrollbar{display:none}

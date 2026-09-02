@@ -411,12 +411,14 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
   const [editing, setEditing] = useState(null); // { rowNumber: null 代表新增, cells: [] }
   const [saving, setSaving] = useState(false);
   const [copiedRow, setCopiedRow] = useState(null); // 剛複製成功的列，用來短暫顯示勾勾
-  const [deleting, setDeleting] = useState(null);   // 待確認刪除的列（刪除不可逆，一律先確認）
+  const [deleting, setDeleting] = useState(null);       // 待確認刪除的列（刪除不可逆，一律先確認）
+  const [deletingRow, setDeletingRow] = useState(null); // 刪除進行中的列號，用來顯示該列進度
 
   const confirmDelete = async () => {
     if (!deleting) return;
     const row = deleting;
     setDeleting(null);
+    setDeletingRow(row.rowNumber);
     try {
       const idToken = await user.getIdToken();
       const data = await callPerfApi({ action: 'delete', idToken, sheet: activeSheet, rowNumber: row.rowNumber });
@@ -425,8 +427,11 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
     } catch (err) {
       console.error(err);
       showToast(err.message, 'error');
-    }
+    } finally { setDeletingRow(null); }
   };
+
+  // 任一項作業進行中就顯示頂部進度條
+  const busy = loading || saving || deletingRow !== null;
 
   const copyRow = async (row) => {
     const text = rowToText(row.cells);
@@ -496,7 +501,13 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20 relative">
+        {/* 讀取／寫入／刪除進行中的進度條（單次請求無百分比，用滑動條表示處理中） */}
+        {busy && (
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-100 overflow-hidden" role="progressbar" aria-label="處理中">
+            <div className="h-full w-1/5 bg-amber-500 progress-indeterminate" />
+          </div>
+        )}
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <button onClick={onBack} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors flex-shrink-0" title="返回系統入口"><ChevronLeft className="w-5 h-5"/></button>
@@ -577,14 +588,27 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
             <button onClick={() => load(activeSheet)} className="mt-3 px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-bold hover:bg-slate-800">重試</button>
           </div>
         ) : loading ? (
-          <p className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 animate-pulse">讀取中…</p>
+          /* 骨架載入：比一行「讀取中」更能表達「資料正在長出來」 */
+          <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className="flex items-start gap-3 px-4 py-3 animate-pulse" style={{ animationDelay: `${i * 90}ms` }}>
+                <div className="w-7 h-7 rounded-lg bg-slate-100 flex-shrink-0"/>
+                <div className="flex-1 space-y-2 py-1">
+                  <div className="h-3 bg-slate-100 rounded" style={{ width: `${92 - i * 7}%` }}/>
+                  <div className="h-3 bg-slate-100 rounded" style={{ width: `${60 - i * 5}%` }}/>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : visible.length === 0 ? (
           <p className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">{table.rows.length === 0 ? '此項目尚無資料' : '找不到符合的項目'}</p>
         ) : (
           /* 單一容器 + 分隔線的清單：比一列一張卡密實，長清單好掃讀 */
           <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
-            {visible.map(row => (
-              <div key={row.rowNumber} className="flex items-start gap-3 px-4 py-3 hover:bg-amber-50/40 transition-colors group">
+            {visible.map(row => {
+              const isDeleting = deletingRow === row.rowNumber;
+              return (
+              <div key={row.rowNumber} className={`flex items-start gap-3 px-4 py-3 transition-colors group ${isDeleting ? 'bg-rose-50/60 opacity-60' : 'hover:bg-amber-50/40'}`}>
                 <span className="mt-0.5 w-7 h-7 rounded-lg bg-slate-100 text-slate-500 text-xs font-bold flex items-center justify-center flex-shrink-0 group-hover:bg-amber-100 group-hover:text-amber-700 transition-colors">{row.cells[0] || '—'}</span>
                 <div className="flex-1 min-w-0 space-y-1">
                   {row.cells.slice(1).map((v, i) => {
@@ -601,23 +625,33 @@ const PerformancePage = ({ user, onBack, parseCSV: parseCsvText, showToast }) =>
                 </div>
                 {/* 水平排列：直排會讓隱藏的編輯鈕仍佔位，把每列撐高 */}
                 <div className="flex items-center gap-0.5 flex-shrink-0">
-                  {/* 複製：檢視者也用得到，所以常駐顯示 */}
-                  <button onClick={() => copyRow(row)} className={`p-1.5 rounded-lg transition-colors ${copiedRow === row.rowNumber ? 'text-emerald-600 bg-emerald-50' : 'text-slate-300 hover:text-amber-700 hover:bg-amber-100'}`} title="複製此列文字">
-                    {copiedRow === row.rowNumber ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4"/>}
-                  </button>
-                  {canEdit && (
+                  {isDeleting ? (
+                    <span className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-bold text-rose-600 whitespace-nowrap">
+                      <Activity className="w-4 h-4 animate-pulse"/> 刪除中…
+                    </span>
+                  ) : (
                     <>
-                      <button onClick={() => setEditing({ rowNumber: row.rowNumber, cells: [...row.cells] })} className="p-1.5 rounded-lg text-slate-300 hover:text-amber-700 hover:bg-amber-100 transition-colors" title="編輯">
-                        <Edit2 className="w-4 h-4"/>
+                      {/* 複製：檢視者也用得到，所以常駐顯示 */}
+                      <button onClick={() => copyRow(row)} className={`p-1.5 rounded-lg transition-colors ${copiedRow === row.rowNumber ? 'text-emerald-600 bg-emerald-50' : 'text-slate-300 hover:text-amber-700 hover:bg-amber-100'}`} title="複製此列文字">
+                        {copiedRow === row.rowNumber ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4"/>}
                       </button>
-                      <button onClick={() => setDeleting(row)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors" title="刪除此列">
-                        <Trash2 className="w-4 h-4"/>
-                      </button>
+                      {canEdit && (
+                        <>
+                          {/* 刪除進行中時停用其他列的編輯／刪除，避免列號位移造成誤刪 */}
+                          <button onClick={() => setEditing({ rowNumber: row.rowNumber, cells: [...row.cells] })} disabled={busy} className="p-1.5 rounded-lg text-slate-300 hover:text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-40 disabled:hover:bg-transparent" title="編輯">
+                            <Edit2 className="w-4 h-4"/>
+                          </button>
+                          <button onClick={() => setDeleting(row)} disabled={busy} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent" title="刪除此列">
+                            <Trash2 className="w-4 h-4"/>
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
