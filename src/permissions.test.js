@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SYSTEM_IDS, isOwnerEmail, normalizeMembers, getAccess, meetsRequirement, canEnterSystem } from './permissions';
+import { SYSTEM_IDS, isOwnerEmail, normalizeMembers, getAccess, canEnterSystem } from './permissions';
 
 describe('isOwnerEmail', () => {
   it('教師帳號不分大小寫皆為 true', () => {
@@ -48,44 +48,28 @@ describe('getAccess', () => {
   });
 });
 
-describe('meetsRequirement 權限門檻', () => {
-  it('admin 只有高權限通過', () => {
-    expect(meetsRequirement('high', 'admin')).toBe(true);
-    expect(meetsRequirement('mid', 'admin')).toBe(false);
-    expect(meetsRequirement('low', 'admin')).toBe(false);
+describe('SYSTEM_IDS 可分配的入口', () => {
+  it('五個入口都可由老師逐一勾選', () => {
+    expect(SYSTEM_IDS).toEqual(['lab', 'property_jl', 'property_kung', 'performance', 'projects']);
   });
-  it('edit 需中或高權限', () => {
-    expect(meetsRequirement('high', 'edit')).toBe(true);
-    expect(meetsRequirement('mid', 'edit')).toBe(true);
-    expect(meetsRequirement('low', 'edit')).toBe(false);
-  });
-  it('無門檻時任何等級皆可', () => {
-    expect(meetsRequirement('low', undefined)).toBe(true);
+  it('老師自動取得全部入口', () => {
+    expect(getAccess('jlpan6666@gmail.com', []).systems).toHaveLength(5);
   });
 });
 
 describe('canEnterSystem 進入系統', () => {
-  const all = SYSTEM_IDS;
-  it('老師（高）三個系統都能進', () => {
-    const a = { level: 'high', systems: all };
-    expect(canEnterSystem(a, 'lab')).toBe(true);
-    expect(canEnterSystem(a, 'property_jl')).toBe(true);
-    expect(canEnterSystem(a, 'property_kung')).toBe(true);
+  it('只看有沒有被勾選該系統，不受等級影響', () => {
+    // 低權限也能進被勾選的系統（進去後為唯讀）
+    expect(canEnterSystem({ level: 'low', systems: ['lab'] }, 'lab')).toBe(true);
+    expect(canEnterSystem({ level: 'mid', systems: ['property_jl'] }, 'property_jl')).toBe(true);
+    expect(canEnterSystem({ level: 'high', systems: ['property_kung'] }, 'property_kung')).toBe(true);
   });
-  it('中權限只能進實驗室，兩位老師的系統都需老師權限', () => {
-    const a = { level: 'mid', systems: all };
-    expect(canEnterSystem(a, 'lab')).toBe(true);
-    expect(canEnterSystem(a, 'property_jl')).toBe(false);
-    expect(canEnterSystem(a, 'property_kung')).toBe(false);
-  });
-  it('低權限三個系統都進不去', () => {
-    const a = { level: 'low', systems: all };
-    expect(canEnterSystem(a, 'lab')).toBe(false);
-    expect(canEnterSystem(a, 'property_jl')).toBe(false);
-    expect(canEnterSystem(a, 'property_kung')).toBe(false);
-  });
-  it('達到門檻但系統未被授權仍不可進入', () => {
+  it('沒被勾選的系統一律進不去，即使是老師權限', () => {
     expect(canEnterSystem({ level: 'high', systems: ['property_jl'] }, 'lab')).toBe(false);
+  });
+  it('全部勾選時三個系統都能進', () => {
+    const a = { level: 'low', systems: SYSTEM_IDS };
+    SYSTEM_IDS.forEach(id => expect(canEnterSystem(a, id)).toBe(true));
   });
   it('未授權者一律不可進入', () => {
     expect(canEnterSystem(null, 'lab')).toBe(false);

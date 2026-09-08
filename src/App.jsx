@@ -38,7 +38,7 @@ import {
   Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp, Rocket, ExternalLink, Award, Copy
 } from 'lucide-react';
 
-import { SYSTEM_IDS, LEVEL_LABELS, SYSTEM_REQUIREMENTS, REQUIREMENT_LABELS, canEnterSystem, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
+import { SYSTEM_IDS, LEVEL_LABELS, canEnterSystem, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
@@ -1146,7 +1146,8 @@ const AuthScreen = ({ setAppMode, user, access, membersLoaded, isAdmin, members,
 
         {(() => {
           // 外部系統（有自己的登入）一律顯示；本系統各模組依成員權限與該系統門檻過濾
-          const visibleSystems = SYSTEM_CONFIGS.filter(sys => sys.externalUrl || sys.standalone || canEnterSystem(access, sys.id));
+          // 五個入口一律依老師的勾選決定是否顯示
+          const visibleSystems = SYSTEM_CONFIGS.filter(sys => canEnterSystem(access, sys.id));
           // 卡片數決定欄數：4 張排成 2×2 比落單一張好看
           const n = visibleSystems.length;
           const cols = n >= 5 ? 'md:grid-cols-2 xl:grid-cols-3'
@@ -1159,7 +1160,6 @@ const AuthScreen = ({ setAppMode, user, access, membersLoaded, isAdmin, members,
             {visibleSystems.map(sys => {
               const Icon = sys.icon;
               const openExternal = () => window.open(sys.externalUrl, '_blank', 'noopener,noreferrer');
-              const requirement = REQUIREMENT_LABELS[SYSTEM_REQUIREMENTS[sys.id]];
               return (
                 // 🟢 全部改用成員驗證，不再有密碼登入頁
                 <div key={sys.id} onClick={() => sys.externalUrl ? openExternal() : enterDirect(sys.id)} className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:-translate-y-2 transition-all group flex flex-col items-center text-center relative">
@@ -1169,7 +1169,6 @@ const AuthScreen = ({ setAppMode, user, access, membersLoaded, isAdmin, members,
                   </div>
                   <h3 className="text-xl font-bold text-slate-800 mb-2">{sys.name}</h3>
                   <p className="text-sm text-slate-400">{sys.externalUrl ? '點擊另開分頁' : '點擊直接進入 (成員已驗證)'}{sys.hint && ` · ${sys.hint}`}</p>
-                  {requirement && <span className="mt-2 text-[11px] text-slate-300 font-medium">{requirement}</span>}
                   {sys.notice && (
                     <span className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold">
                       <AlertTriangle className="w-3.5 h-3.5"/> {sys.notice}
@@ -1396,15 +1395,11 @@ export default function App() {
   useEffect(() => {
     if (!appMode || !user || !membersLoaded) return;
     if (!access) { handleLogout(); return; }
-    // standalone 頁面（如績效）不屬於成員系統權限的管轄範圍，跳過檢查
-    const cfg = SYSTEM_CONFIGS.find(s => s.id === appMode);
-    if (cfg?.standalone) return;
-    // 一併檢查該系統的權限門檻，避免舊的 localStorage 繞過（例如降權後仍留在系統內）
+    // 五個入口一致檢查，避免舊的 localStorage 繞過（例如被取消勾選後仍留在系統內）
     if (!canEnterSystem(access, appMode)) {
       localStorage.removeItem('appMode');
       setAppMode(null);
-      const need = REQUIREMENT_LABELS[SYSTEM_REQUIREMENTS[appMode]];
-      showToast(need ? `此系統${need}` : '您沒有進入此系統的權限', 'error');
+      showToast('您沒有進入此系統的權限', 'error');
     }
   }, [appMode, user, membersLoaded, access]);
 
