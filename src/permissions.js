@@ -37,6 +37,7 @@ export const getAccess = (email, members) => {
 //   未列出 = 任何授權成員皆可進入
 export const SYSTEM_REQUIREMENTS = {
   lab: 'edit',
+  property_jl: 'admin',
   property_kung: 'admin',
 };
 

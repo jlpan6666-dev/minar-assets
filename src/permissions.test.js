@@ -72,16 +72,16 @@ describe('canEnterSystem 進入系統', () => {
     expect(canEnterSystem(a, 'property_jl')).toBe(true);
     expect(canEnterSystem(a, 'property_kung')).toBe(true);
   });
-  it('中權限可進實驗室與建良老師，但進不了龔老師財產盤點', () => {
+  it('中權限只能進實驗室，兩位老師的系統都需老師權限', () => {
     const a = { level: 'mid', systems: all };
     expect(canEnterSystem(a, 'lab')).toBe(true);
-    expect(canEnterSystem(a, 'property_jl')).toBe(true);
+    expect(canEnterSystem(a, 'property_jl')).toBe(false);
     expect(canEnterSystem(a, 'property_kung')).toBe(false);
   });
-  it('低權限只能進沒有門檻的建良老師設備管理', () => {
+  it('低權限三個系統都進不去', () => {
     const a = { level: 'low', systems: all };
     expect(canEnterSystem(a, 'lab')).toBe(false);
-    expect(canEnterSystem(a, 'property_jl')).toBe(true);
+    expect(canEnterSystem(a, 'property_jl')).toBe(false);
     expect(canEnterSystem(a, 'property_kung')).toBe(false);
   });
   it('達到門檻但系統未被授權仍不可進入', () => {
