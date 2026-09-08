@@ -38,7 +38,7 @@ import {
   Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp, Rocket, ExternalLink, Award, Copy
 } from 'lucide-react';
 
-import { SYSTEM_IDS, LEVEL_LABELS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
+import { SYSTEM_IDS, LEVEL_LABELS, SYSTEM_REQUIREMENTS, REQUIREMENT_LABELS, canEnterSystem, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
@@ -1047,24 +1047,13 @@ const MemberModal = ({ isOpen, onClose, members, onAdd, onUpdate, onRemove }) =>
 };
 
 // --- 頁面：多系統登入 ---
-const AuthScreen = ({ setAppMode, systemPasswords, user, access, membersLoaded, isAdmin, members, onAddMember, onUpdateMember, onRemoveMember }) => {
-  const [selectedSys, setSelectedSystem] = useState(null);
-  const [password, setPassword] = useState('');
+const AuthScreen = ({ setAppMode, user, access, membersLoaded, isAdmin, members, onAddMember, onUpdateMember, onRemoveMember }) => {
   const [error, setError] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
   const [isGearOpen, setIsGearOpen] = useState(false);
   const [isMemberOpen, setIsMemberOpen] = useState(false);
 
   const isGoogleUser = user && !user.isAnonymous;
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    const correctPwd = systemPasswords[selectedSys.id] || selectedSys.pwd;
-    if (password !== correctPwd) { setError('密碼錯誤，請重新輸入'); return; }
-    localStorage.setItem('appMode', selectedSys.id);
-    setAppMode(selectedSys.id);
-  };
 
   // 🟢 Google 登入：授權結果由 App 監聽成員名單後自動判定
   const handleGoogleLogin = async () => {
@@ -1155,9 +1144,9 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, access, membersLoaded, 
           </p>
         </div>
 
-        {!selectedSys ? (() => {
-          // 外部系統（有自己的登入）一律顯示；本系統各模組依成員權限過濾
-          const visibleSystems = SYSTEM_CONFIGS.filter(sys => sys.externalUrl || sys.standalone || access.systems.includes(sys.id));
+        {(() => {
+          // 外部系統（有自己的登入）一律顯示；本系統各模組依成員權限與該系統門檻過濾
+          const visibleSystems = SYSTEM_CONFIGS.filter(sys => sys.externalUrl || sys.standalone || canEnterSystem(access, sys.id));
           // 卡片數決定欄數：4 張排成 2×2 比落單一張好看
           const n = visibleSystems.length;
           const cols = n >= 5 ? 'md:grid-cols-2 xl:grid-cols-3'
@@ -1169,16 +1158,18 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, access, membersLoaded, 
           <div className={`grid grid-cols-1 gap-6 ${cols}`}>
             {visibleSystems.map(sys => {
               const Icon = sys.icon;
-              const direct = sys.id === 'property_jl'; // 🟢 建良老師系統：成員免密碼直接進入
               const openExternal = () => window.open(sys.externalUrl, '_blank', 'noopener,noreferrer');
+              const requirement = REQUIREMENT_LABELS[SYSTEM_REQUIREMENTS[sys.id]];
               return (
-                <div key={sys.id} onClick={() => sys.externalUrl ? openExternal() : (sys.standalone || direct) ? enterDirect(sys.id) : setSelectedSystem(sys)} className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:-translate-y-2 transition-all group flex flex-col items-center text-center relative">
+                // 🟢 全部改用成員驗證，不再有密碼登入頁
+                <div key={sys.id} onClick={() => sys.externalUrl ? openExternal() : enterDirect(sys.id)} className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:-translate-y-2 transition-all group flex flex-col items-center text-center relative">
                   {sys.externalUrl && <ExternalLink className="w-4 h-4 text-slate-300 absolute top-4 right-4 group-hover:text-slate-500 transition-colors" />}
                   <div className={`w-20 h-20 rounded-2xl flex items-center justify-center mb-6 shadow-md transition-transform group-hover:scale-110 ${sys.colorClass}`}>
                     <Icon className="w-10 h-10 text-white" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800 mb-2">{sys.name}</h3>
-                  <p className="text-sm text-slate-400">{sys.externalUrl ? '點擊另開分頁' : (sys.standalone || direct) ? '點擊直接進入 (成員已驗證)' : '點擊進入登入頁面'}{sys.hint && ` · ${sys.hint}`}</p>
+                  <p className="text-sm text-slate-400">{sys.externalUrl ? '點擊另開分頁' : '點擊直接進入 (成員已驗證)'}{sys.hint && ` · ${sys.hint}`}</p>
+                  {requirement && <span className="mt-2 text-[11px] text-slate-300 font-medium">{requirement}</span>}
                   {sys.notice && (
                     <span className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold">
                       <AlertTriangle className="w-3.5 h-3.5"/> {sys.notice}
@@ -1189,26 +1180,7 @@ const AuthScreen = ({ setAppMode, systemPasswords, user, access, membersLoaded, 
             })}
           </div>
           );
-        })() : (
-          <div className="max-w-md mx-auto bg-white rounded-2xl shadow-xl overflow-hidden p-8 animate-in zoom-in-95 duration-300">
-            <button onClick={() => {setSelectedSystem(null); setPassword(''); setError('');}} className="text-sm text-slate-400 hover:text-slate-700 flex items-center gap-1 mb-6 transition-colors">
-              <ChevronLeft className="w-4 h-4"/> 返回選擇系統
-            </button>
-            <div className="text-center mb-8">
-              <div className={`mx-auto w-16 h-16 rounded-2xl flex items-center justify-center mb-4 shadow-lg ${selectedSys.colorClass}`}>
-                <selectedSys.icon className="w-8 h-8 text-white"/>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800">{selectedSys.name}</h2>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <input type="password" placeholder="請輸入管理密碼" value={password} onChange={e=>setPassword(e.target.value)} className="w-full border-2 border-slate-200 p-3.5 rounded-xl outline-none focus:border-indigo-500 transition-colors text-lg tracking-widest text-center font-mono" required autoFocus/>
-              {error && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center justify-center gap-2"><AlertTriangle className="w-4 h-4"/> {error}</div>}
-              <button type="submit" className={`w-full text-white py-3.5 rounded-xl font-bold transition-colors shadow-md ${selectedSys.colorClass} ${selectedSys.hoverClass}`}>
-                確認登入
-              </button>
-            </form>
-          </div>
-        )}
+        })()}
       </div>
     </div>
   );
@@ -1427,10 +1399,12 @@ export default function App() {
     // standalone 頁面（如績效）不屬於成員系統權限的管轄範圍，跳過檢查
     const cfg = SYSTEM_CONFIGS.find(s => s.id === appMode);
     if (cfg?.standalone) return;
-    if (!access.systems.includes(appMode)) {
+    // 一併檢查該系統的權限門檻，避免舊的 localStorage 繞過（例如降權後仍留在系統內）
+    if (!canEnterSystem(access, appMode)) {
       localStorage.removeItem('appMode');
       setAppMode(null);
-      showToast('您沒有進入此系統的權限', 'error');
+      const need = REQUIREMENT_LABELS[SYSTEM_REQUIREMENTS[appMode]];
+      showToast(need ? `此系統${need}` : '您沒有進入此系統的權限', 'error');
     }
   }, [appMode, user, membersLoaded, access]);
 
@@ -2671,7 +2645,7 @@ export default function App() {
   if (!user || !appMode || !isAuthorizedMember) return (
     <>
       {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
-      <AuthScreen setAppMode={setAppMode} systemPasswords={systemPasswords} user={user} access={access} membersLoaded={membersLoaded} isAdmin={isAdmin} members={members} onAddMember={handleAddMember} onUpdateMember={handleUpdateMember} onRemoveMember={handleRemoveMember} />
+      <AuthScreen setAppMode={setAppMode} user={user} access={access} membersLoaded={membersLoaded} isAdmin={isAdmin} members={members} onAddMember={handleAddMember} onUpdateMember={handleUpdateMember} onRemoveMember={handleRemoveMember} />
     </>
   );
 

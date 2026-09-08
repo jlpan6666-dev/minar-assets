@@ -30,3 +30,29 @@ export const getAccess = (email, members) => {
   const m = members.find((x) => (x.email || '').toLowerCase() === lower);
   return m ? { level: m.level, systems: m.systems } : null;
 };
+
+// 🟢 各系統的進入門檻（取代原本的密碼登入）
+//   edit  = 需可讀寫（中或高）
+//   admin = 需老師權限（高）
+//   未列出 = 任何授權成員皆可進入
+export const SYSTEM_REQUIREMENTS = {
+  lab: 'edit',
+  property_kung: 'admin',
+};
+
+export const REQUIREMENT_LABELS = {
+  edit: '需可讀寫權限',
+  admin: '需老師權限',
+};
+
+export const meetsRequirement = (level, requirement) => {
+  if (requirement === 'admin') return level === 'high';
+  if (requirement === 'edit') return level === 'high' || level === 'mid';
+  return true; // 無門檻
+};
+
+// 這個人能不能進入該系統：要在授權名單內，且達到該系統的門檻
+export const canEnterSystem = (access, systemId) =>
+  !!access
+  && access.systems.includes(systemId)
+  && meetsRequirement(access.level, SYSTEM_REQUIREMENTS[systemId]);

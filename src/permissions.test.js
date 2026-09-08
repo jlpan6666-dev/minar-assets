@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SYSTEM_IDS, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
+import { SYSTEM_IDS, isOwnerEmail, normalizeMembers, getAccess, meetsRequirement, canEnterSystem } from './permissions';
 
 describe('isOwnerEmail', () => {
   it('教師帳號不分大小寫皆為 true', () => {
@@ -45,5 +45,49 @@ describe('getAccess', () => {
     expect(getAccess('nobody@gmail.com', members)).toBeNull();
     expect(getAccess('', members)).toBeNull();
     expect(getAccess(null, members)).toBeNull();
+  });
+});
+
+describe('meetsRequirement 權限門檻', () => {
+  it('admin 只有高權限通過', () => {
+    expect(meetsRequirement('high', 'admin')).toBe(true);
+    expect(meetsRequirement('mid', 'admin')).toBe(false);
+    expect(meetsRequirement('low', 'admin')).toBe(false);
+  });
+  it('edit 需中或高權限', () => {
+    expect(meetsRequirement('high', 'edit')).toBe(true);
+    expect(meetsRequirement('mid', 'edit')).toBe(true);
+    expect(meetsRequirement('low', 'edit')).toBe(false);
+  });
+  it('無門檻時任何等級皆可', () => {
+    expect(meetsRequirement('low', undefined)).toBe(true);
+  });
+});
+
+describe('canEnterSystem 進入系統', () => {
+  const all = SYSTEM_IDS;
+  it('老師（高）三個系統都能進', () => {
+    const a = { level: 'high', systems: all };
+    expect(canEnterSystem(a, 'lab')).toBe(true);
+    expect(canEnterSystem(a, 'property_jl')).toBe(true);
+    expect(canEnterSystem(a, 'property_kung')).toBe(true);
+  });
+  it('中權限可進實驗室與建良老師，但進不了龔老師財產盤點', () => {
+    const a = { level: 'mid', systems: all };
+    expect(canEnterSystem(a, 'lab')).toBe(true);
+    expect(canEnterSystem(a, 'property_jl')).toBe(true);
+    expect(canEnterSystem(a, 'property_kung')).toBe(false);
+  });
+  it('低權限只能進沒有門檻的建良老師設備管理', () => {
+    const a = { level: 'low', systems: all };
+    expect(canEnterSystem(a, 'lab')).toBe(false);
+    expect(canEnterSystem(a, 'property_jl')).toBe(true);
+    expect(canEnterSystem(a, 'property_kung')).toBe(false);
+  });
+  it('達到門檻但系統未被授權仍不可進入', () => {
+    expect(canEnterSystem({ level: 'high', systems: ['property_jl'] }, 'lab')).toBe(false);
+  });
+  it('未授權者一律不可進入', () => {
+    expect(canEnterSystem(null, 'lab')).toBe(false);
   });
 });
