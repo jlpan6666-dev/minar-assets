@@ -3,14 +3,17 @@
 export const SYSTEM_IDS = ['lab', 'property_jl', 'property_kung', 'performance', 'projects'];
 
 // 每個入口各自可選的權限（由低到高）
-export const ACCESS_LEVELS = ['none', 'low', 'mid', 'high'];
+// 「能不能管理成員」是獨立的核取選項（canManage），不再是一種權限等級
+export const ACCESS_LEVELS = ['none', 'low', 'mid'];
 
 export const LEVEL_LABELS = {
   none: '禁止存取',
   low: '唯讀',
   mid: '可讀寫',
-  high: '同老師權限',
 };
+
+// 舊資料的 'high'（同老師權限）與可讀寫行為相同，一律收斂為 mid
+const normalizeLevel = (level) => (level === 'high' ? 'mid' : (ACCESS_LEVELS.includes(level) ? level : 'none'));
 
 // 教師/管理者帳號直接寫死（免邀請即可登入、全部入口最高權限，且不可被名單移除）
 // 成員管理也只有這些帳號能操作——避免被授予「同老師權限」的人反過來提升自己其他入口的權限
@@ -24,11 +27,15 @@ export const levelsForAll = (level) =>
 
 // 舊格式的整體等級 → 各入口等級（僅被授權的入口沿用該等級，其餘為禁止存取）
 const fromLegacy = (level, systems = []) =>
-  SYSTEM_IDS.reduce((acc, id) => ({ ...acc, [id]: systems.includes(id) ? (level || 'mid') : 'none' }), {});
+  SYSTEM_IDS.reduce((acc, id) => ({ ...acc, [id]: systems.includes(id) ? normalizeLevel(level || 'mid') : 'none' }), {});
 
-// Firestore 文件 → Member[]，每筆為 { email, levels }
+// 補齊所有入口並收斂等級（舊的 high → mid、未知值 → none）
+const sanitize = (levels = {}) =>
+  SYSTEM_IDS.reduce((acc, id) => ({ ...acc, [id]: normalizeLevel(levels[id]) }), {});
+
+// Firestore 文件 → Member[]，每筆為 { email, canManage, levels }
 // 相容三種格式：
-//   1. 新版 { members: [{ email, levels }] }
+//   1. 新版 { members: [{ email, canManage, levels }] }
 //   2. 舊版 { members: [{ email, level, systems }] }  → 依 systems 展開
 //   3. 更舊 { emails: [...] }                         → 全部入口可讀寫
 export const normalizeMembers = (data) => {
@@ -37,25 +44,29 @@ export const normalizeMembers = (data) => {
   if (Array.isArray(data.members)) {
     return data.members.map((m) => ({
       email: m.email,
-      levels: m.levels ? { ...levelsForAll('none'), ...m.levels } : fromLegacy(m.level, m.systems),
+      canManage: !!m.canManage,
+      levels: m.levels ? sanitize(m.levels) : fromLegacy(m.level, m.systems),
     }));
   }
 
   if (Array.isArray(data.emails)) {
-    return data.emails.map((email) => ({ email, levels: levelsForAll('mid') }));
+    return data.emails.map((email) => ({ email, canManage: false, levels: levelsForAll('mid') }));
   }
 
   return [];
 };
 
-// email → { levels } 或 null（未授權）
+// email → { levels, canManage } 或 null（未授權）
 export const getAccess = (email, members) => {
   const lower = (email || '').toLowerCase();
   if (!lower) return null;
-  if (isOwnerEmail(lower)) return { levels: levelsForAll('high') };
+  if (isOwnerEmail(lower)) return { levels: levelsForAll('mid'), canManage: true };
   const m = members.find((x) => (x.email || '').toLowerCase() === lower);
-  return m ? { levels: m.levels } : null;
+  return m ? { levels: m.levels, canManage: !!m.canManage } : null;
 };
+
+// 能不能管理成員（邀請、調整權限、移除）
+export const canManageMembers = (access) => !!access?.canManage;
 
 // 某人在某個入口的權限
 export const levelFor = (access, systemId) => access?.levels?.[systemId] || 'none';

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
@@ -38,7 +38,7 @@ import {
   Cpu, HardDrive, MemoryStick, Network, ChevronDown, ChevronUp, Rocket, ExternalLink, Award, Copy
 } from 'lucide-react';
 
-import { SYSTEM_IDS, ACCESS_LEVELS, LEVEL_LABELS, canEnterSystem, canEditIn, hasAnyAccess, levelFor, levelsForAll, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
+import { SYSTEM_IDS, ACCESS_LEVELS, LEVEL_LABELS, canEnterSystem, canEditIn, hasAnyAccess, canManageMembers, levelFor, levelsForAll, isOwnerEmail, normalizeMembers, getAccess } from './permissions';
 import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, colLetter, DEFAULT_COLS, DEFAULT_ROWS } from './cabinet';
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
@@ -1017,9 +1017,18 @@ const PermissionMatrix = ({ levels, onChange, idPrefix }) => {
 
 // --- 元件：實驗室成員管理 Modal（僅寫死的老師帳號可開啟） ---
 const MemberModal = ({ isOpen, onClose, members, onAdd, onUpdate, onRemove }) => {
-  const emptyForm = { email: '', levels: levelsForAll('mid') };
+  const emptyForm = { email: '', canManage: false, levels: levelsForAll('mid') };
   const [form, setForm] = useState(emptyForm);
   if (!isOpen) return null;
+
+  // 可管理成員的核取方塊（邀請表單與名單共用）
+  const ManageToggle = ({ checked, onChange, id }) => (
+    <label htmlFor={id} className="flex items-center gap-2 cursor-pointer select-none py-1">
+      <input id={id} type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="w-4 h-4 accent-blue-600 cursor-pointer"/>
+      <span className="text-xs font-bold text-slate-600">可管理成員</span>
+      <span className="text-[10px] text-slate-400">（可邀請、調整權限、移除成員）</span>
+    </label>
+  );
 
   const submit = async (e) => {
     e.preventDefault();
@@ -1054,6 +1063,9 @@ const MemberModal = ({ isOpen, onClose, members, onAdd, onUpdate, onRemove }) =>
 
           <div className="bg-white rounded-lg border border-slate-200 p-2">
             <PermissionMatrix levels={form.levels} onChange={levels => setForm({ ...form, levels })} idPrefix="new" />
+            <div className="border-t border-slate-100 mt-1 pt-1 px-1">
+              <ManageToggle id="new-can-manage" checked={form.canManage} onChange={canManage => setForm({ ...form, canManage })} />
+            </div>
           </div>
 
           <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-bold shadow-sm flex items-center justify-center gap-1"><Plus className="w-4 h-4"/> 邀請</button>
@@ -1069,6 +1081,9 @@ const MemberModal = ({ isOpen, onClose, members, onAdd, onUpdate, onRemove }) =>
                 <button onClick={() => onRemove(m.email)} title="移除授權" className="text-slate-400 hover:text-rose-500 p-1 transition-colors flex-shrink-0"><Trash2 className="w-4 h-4"/></button>
               </div>
               <PermissionMatrix levels={m.levels} onChange={levels => onUpdate(m.email, { levels })} idPrefix={m.email} />
+              <div className="border-t border-slate-100 pt-1 px-1">
+                <ManageToggle id={`manage-${m.email}`} checked={!!m.canManage} onChange={canManage => onUpdate(m.email, { canManage })} />
+              </div>
             </div>
           ))}
         </div>
@@ -1368,8 +1383,8 @@ export default function App() {
     [user, userEmail, members]
   );
   const isAuthorizedMember = hasAnyAccess(access); // 至少有一個入口可進入
-  // 成員管理只開放給寫死的老師帳號：否則被授予「同老師權限」的人可反過來提升自己其他入口的權限
-  const isAdmin = !!user && !user.isAnonymous && isOwnerEmail(userEmail);
+  // 成員管理：寫死的老師帳號，或被勾選「可管理成員」的人
+  const isAdmin = canManageMembers(access);
   const canEdit = canEditIn(access, appMode);     // 依「目前所在入口」判定能否編輯
 
   // DB Path Helpers
@@ -1665,7 +1680,7 @@ export default function App() {
     const levels = { ...levelsForAll('none'), ...(form.levels || {}) };
     if (!SYSTEM_IDS.some(id => levels[id] !== 'none')) { showToast('請至少開放一個入口', 'error'); return false; }
     try {
-      await setDoc(membersDocRef(), { members: [...members, { email, levels }] }, { merge: true });
+      await setDoc(membersDocRef(), { members: [...members, { email, canManage: !!form.canManage, levels }] }, { merge: true });
       showToast('已加入成員名單，該學生即可用此 Google 帳號登入');
       return true;
     } catch (err) { console.error(err); showToast('新增失敗', 'error'); return false; }
