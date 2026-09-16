@@ -43,7 +43,7 @@ import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, 
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
 import { perfCsvUrl, PERF_SHEET_EDIT_URL, isApiConfigured, callPerfApi, parseSheetTable, filterSheetRows, isSequenceColumn, newFirstCell, groupSheetNames, mainCellIndex, rowToText } from './performance';
-import { parseSheet, toQuantity } from './excelImport';
+import { parseSheet, toQuantity, buildImageColumn, TEMPLATE_HEADERS, TEMPLATE_EXAMPLE_ROWS, TEMPLATE_NOTES } from './excelImport';
 import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
@@ -1918,10 +1918,15 @@ export default function App() {
       const buf = await wb.xlsx.writeBuffer();
       const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
       const a = document.createElement('a');
-      a.href = url; a.download = filename;
+      a.href = url;
+      a.download = filename;
+      // 一定要掛進 DOM 再點，且等瀏覽器接手後才釋放，否則有些瀏覽器會拿到空檔案
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
-      showToast("Excel 下載已開始");
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const total = sheets.reduce((n, s) => n + (s.images?.length || 0), 0);
+      showToast(`Excel 下載已開始（含 ${total} 張圖片）`);
       return true;
     } catch (err) {
       console.error(err);
@@ -1930,15 +1935,19 @@ export default function App() {
     }
   };
 
-  // 🟢 把 imageUrl 攤成「圖片欄文字 + 嵌入圖清單」：base64 的嵌入、外部網址寫成文字
-  const buildImageColumn = (items, imageCol) => {
-    const images = [];
-    const texts = items.map((item, i) => {
-      const url = item.imageUrl || '';
-      if (url.startsWith('data:image')) { images.push({ row: i + 1, col: imageCol, dataUrl: url }); return ''; }
-      return url;
-    });
-    return { texts, images };
+  // 🟢 沒有任何可嵌入的圖片時講清楚，不要讓人以為匯出壞掉
+  const warnIfNoImages = (items) => {
+    if (!items.some((i) => (i.imageUrl || '').startsWith('data:image'))) {
+      showToast("這份清單沒有已上傳的照片，匯出的「圖片」欄會是空的", "error");
+    }
+  };
+
+  // 🟢 統一匯入範本：兩個系統共用同一份欄位，「圖片」欄直接把圖貼進格子即可
+  const handleDownloadTemplate = async () => {
+    await downloadSheet('資產匯入範本.xlsx', [
+      { name: '資料', headers: TEMPLATE_HEADERS, rows: TEMPLATE_EXAMPLE_ROWS },
+      { name: '填寫說明', headers: TEMPLATE_NOTES[0], rows: TEMPLATE_NOTES.slice(1) },
+    ]);
   };
 
   const handleExportExcel = async (sessionToExport = currentSession, exportSelectedOnly = false) => {
@@ -1990,6 +1999,7 @@ export default function App() {
     headers = [...headers, "圖片"];
     const { texts, images } = buildImageColumn(exportItems, imageCol);
     rows = rows.map((r, i) => [...r, texts[i]]);
+    warnIfNoImages(exportItems);
 
     const tablePrefix = (!isLab && currentTable && currentSession && sessionToExport.id === currentSession.id) ? `_${currentTable.name}` : '';
     const selectionPrefix = exportSelectedOnly ? '_選取項目' : '';
@@ -2031,6 +2041,7 @@ export default function App() {
     // 圖片加在原欄位之後，貼回線上試算表時前面的欄序不變
     const imageCol = SHEET_HEADERS.length;
     const { texts, images } = buildImageColumn(itemsList, imageCol);
+    warnIfNoImages(itemsList);
     await downloadSheet(`${currentSession.name}_試算表格式.xlsx`, [{
       name: '材料設備',
       headers: [...SHEET_HEADERS, '圖片'],
@@ -2058,6 +2069,7 @@ export default function App() {
       const orphans = all.filter(i => !tables.some(t => t.id === i.tableId));
       if (orphans.length) sheets.push(toSheet('未歸屬表單', orphans));
       if (!sheets.length) { showToast("無資料可匯出", "error"); return; }
+      warnIfNoImages(all);
       await downloadSheet(`${currentSession.name}_全部表單.xlsx`, sheets);
     } catch (err) { console.error(err); showToast("匯出失敗", "error"); }
   };
@@ -3085,7 +3097,10 @@ export default function App() {
                           <button onClick={() => { setIsActionMenuOpen(false); openSheetModal(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 從 Google 試算表匯入</button>
                         )}
                         {canEdit && (isLab || currentTable) && (
-                          <button onClick={() => { setIsActionMenuOpen(false); fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel（含圖片）</button>
+                          <>
+                            <button onClick={() => { setIsActionMenuOpen(false); fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel（含圖片）</button>
+                            <button onClick={() => { handleDownloadTemplate(); setIsActionMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileDown className="w-4 h-4 text-slate-500"/> 下載統一匯入範本</button>
+                          </>
                         )}
                         <div className="h-px bg-slate-100 my-1 mx-2"></div>
                       </>

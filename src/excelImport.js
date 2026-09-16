@@ -124,3 +124,45 @@ export const toQuantity = (text) => {
   const n = parseInt(String(text ?? '').replace(/[^\d-]/g, ''), 10);
   return Number.isFinite(n) && n >= 0 ? n : 0;
 };
+
+// --- 匯出 ---
+
+// 把每筆資料的 imageUrl 攤成「圖片欄文字」與「要嵌入的圖片清單」
+// base64 的嵌進檔案裡；外部網址嵌不進去（跨網域抓不到），改寫成文字讓人點得到
+// imageCol 為 0-based 欄號；回傳的 images.row 已含表頭列（第一筆資料是 row 1）
+export const buildImageColumn = (items = [], imageCol = 0) => {
+  const images = [];
+  const texts = items.map((item, i) => {
+    const url = item?.imageUrl || '';
+    if (url.startsWith('data:image')) {
+      images.push({ row: i + 1, col: imageCol, dataUrl: url });
+      return '';
+    }
+    return url;
+  });
+  return { texts, images };
+};
+
+// --- 統一匯入格式 ---
+// 一份範本兩個系統通用：實驗室設備只要填 名稱/分類/數量/備註/圖片，
+// 財產盤點再多填 財產編號 之後那幾欄。匯入是依欄名對應，用不到的欄留空即可
+export const TEMPLATE_HEADERS = [
+  '名稱', '分類', '數量', '備註', '圖片',
+  '財產編號', '廠牌型別', '現值', '取得日期', '使用年限', '使用人', '存置地點', '盤點狀況',
+];
+
+export const TEMPLATE_EXAMPLE_ROWS = [
+  ['土壤溼度感測器', '感測器', '29', '放在 A3 抽屜', '', '', '', '', '', '', '', '', ''],
+  ['示波器', '', '1', '', '', 'P-001', 'ACME X1', '12000', '2024/03/01', '5', '王小明', 'A-101', '未盤點'],
+];
+
+export const TEMPLATE_NOTES = [
+  ['欄位', '說明'],
+  ['名稱', '必填。實驗室設備管理與財產盤點都用這一欄。'],
+  ['圖片', '把圖片直接貼在這一欄的格子裡即可，匯入時會自動抓進系統；也可以填圖片網址。'],
+  ['數量', '只有實驗室設備管理會用到，填數字。'],
+  ['分類', '只有實驗室設備管理會用到；名稱要和系統既有分類一致才會自動歸類。'],
+  ['財產編號 以後各欄', '只有財產盤點會用到，實驗室設備可整欄留空。'],
+  ['盤點狀況', '留空視為「未盤點」。'],
+  ['欄位順序', '可以自由調換，也可以刪掉用不到的欄，系統是依欄名對應而不是依欄序。'],
+];

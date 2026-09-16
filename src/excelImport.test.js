@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { headerKey, findHeaderRow, buildGroups, groupForColumn, parseSheet, toQuantity } from './excelImport';
+import {
+  headerKey, findHeaderRow, buildGroups, groupForColumn, parseSheet, toQuantity,
+  buildImageColumn, TEMPLATE_HEADERS, TEMPLATE_EXAMPLE_ROWS,
+} from './excelImport';
 
 // 取自使用者提供的「感測器物件清單.xlsx」：表頭在第 3 列（索引 2），左右並排兩組 名稱/數量/圖片
 const 感測器清單 = [
@@ -158,6 +161,60 @@ describe('parseSheet 依欄名解析', () => {
   it('空輸入不炸', () => {
     expect(parseSheet([]).records).toEqual([]);
     expect(parseSheet().records).toEqual([]);
+  });
+});
+
+describe('buildImageColumn 匯出時的圖片欄', () => {
+  it('base64 圖片放進嵌入清單，圖片欄文字留空', () => {
+    const items = [{ imageUrl: 'data:image/jpeg;base64,AAA' }];
+    const { texts, images } = buildImageColumn(items, 7);
+    expect(texts).toEqual(['']);
+    expect(images).toEqual([{ row: 1, col: 7, dataUrl: 'data:image/jpeg;base64,AAA' }]);
+  });
+
+  it('外部網址嵌不進去，改寫成文字保留', () => {
+    const { texts, images } = buildImageColumn([{ imageUrl: 'https://example.com/a.jpg' }], 7);
+    expect(texts).toEqual(['https://example.com/a.jpg']);
+    expect(images).toEqual([]);
+  });
+
+  it('沒有圖片時兩邊都是空的（此時匯出會走回純文字路徑）', () => {
+    const { texts, images } = buildImageColumn([{ imageUrl: '' }, {}], 7);
+    expect(texts).toEqual(['', '']);
+    expect(images).toEqual([]);
+  });
+
+  it('row 從 1 開始，因為第 0 列是表頭', () => {
+    const items = [{ imageUrl: '' }, { imageUrl: 'data:image/png;base64,BBB' }];
+    expect(buildImageColumn(items, 2).images).toEqual([{ row: 2, col: 2, dataUrl: 'data:image/png;base64,BBB' }]);
+  });
+
+  it('空清單不炸', () => {
+    expect(buildImageColumn()).toEqual({ texts: [], images: [] });
+  });
+});
+
+describe('統一匯入範本', () => {
+  it('範本的每個欄名都認得出來（否則填了也匯不進去）', () => {
+    TEMPLATE_HEADERS.forEach((h) => expect(headerKey(h)).not.toBeNull());
+  });
+  it('兩個系統的欄位都涵蓋到', () => {
+    const keys = TEMPLATE_HEADERS.map(headerKey);
+    expect(keys).toContain('name');
+    expect(keys).toContain('quantity');   // 實驗室設備
+    expect(keys).toContain('propId');     // 財產盤點
+    expect(keys).toContain('image');
+  });
+  it('示範列的欄數與表頭一致', () => {
+    TEMPLATE_EXAMPLE_ROWS.forEach((r) => expect(r).toHaveLength(TEMPLATE_HEADERS.length));
+  });
+  it('範本本身就能被自己的解析器讀回來', () => {
+    const { records } = parseSheet([TEMPLATE_HEADERS, ...TEMPLATE_EXAMPLE_ROWS]);
+    expect(records).toHaveLength(2);
+    expect(records[0].fields.name).toBe('土壤溼度感測器');
+    expect(toQuantity(records[0].fields.quantity)).toBe(29);
+    expect(records[1].fields.propId).toBe('P-001');
+    expect(records[1].fields.acquireDate).toBe('2024/03/01');
   });
 });
 
