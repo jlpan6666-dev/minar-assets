@@ -43,6 +43,7 @@ import { buildGrid, countByStatus, unassignedItems, fitGridSize, normalizeSlot, 
 import { SHEET_HEADERS, parseSheetRows, diffEquipment } from './sheetSync';
 import { PC_SHEET_CSV_URL, PC_SHEET_EDIT_URL, SCAN_TOOL_PATH, SCAN_TOOL_FILENAME, parsePcRows, filterPcRows, latestUpdatedAt, makeFieldGetter, restFields } from './pcInventory';
 import { perfCsvUrl, PERF_SHEET_EDIT_URL, isApiConfigured, callPerfApi, parseSheetTable, filterSheetRows, isSequenceColumn, newFirstCell, groupSheetNames, mainCellIndex, rowToText } from './performance';
+import { parseSheet, toQuantity } from './excelImport';
 import { addDays, splitLoansByDue } from './loanDue';
 
 // ==========================================
@@ -107,36 +108,97 @@ const todayStr = () => {
 };
 
 // --- 🔵 工具函式：圖片壓縮轉 Base64 ---
+// 縮到 600px 寬的 JPEG；Excel 匯入的嵌入圖已經是 data URL，直接走這裡不必再包成 File
+const shrinkDataUrl = (dataUrl) => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const maxWidth = 600;
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      resolve(canvas.toDataURL('image/jpeg', 0.5));
+    };
+    img.onerror = (error) => reject(error);
+    img.src = dataUrl;
+  });
+};
+
 const compressImage = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target.result;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxWidth = 600; 
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.5); 
-        resolve(dataUrl);
-      };
-      img.onerror = (error) => reject(error);
-    };
+    reader.onload = (event) => shrinkDataUrl(event.target.result).then(resolve, reject);
     reader.onerror = (error) => reject(error);
   });
+};
+
+// --- 🔵 ExcelJS：只有要讀寫「含圖片」的 Excel 時才載入（約 1MB，別拖慢首次開啟）---
+const EXCELJS_CDN = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+let excelJsPromise = null;
+const loadExcelJS = () => {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if (!excelJsPromise) {
+    excelJsPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = EXCELJS_CDN;
+      s.async = true;
+      s.onload = () => (window.ExcelJS ? resolve(window.ExcelJS) : reject(new Error('ExcelJS 載入異常')));
+      s.onerror = () => { excelJsPromise = null; reject(new Error('ExcelJS 載入失敗')); };
+      document.head.appendChild(s);
+    });
+  }
+  return excelJsPromise;
+};
+
+// Uint8Array → data URL（分段轉，避免一次 apply 太多 byte 爆掉）
+const bytesToDataUrl = (bytes, ext = 'png') => {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let bin = '';
+  for (let i = 0; i < arr.length; i += 0x8000) bin += String.fromCharCode.apply(null, arr.subarray(i, i + 0x8000));
+  return `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${btoa(bin)}`;
+};
+
+const dataUrlExt = (dataUrl) => (/^data:image\/(\w+);base64,/.exec(dataUrl || '') || [])[1];
+
+// 讀第一張工作表 → { rows: 純文字二維陣列, images: [{row, col, dataUrl}] }（皆 0-based）
+const readSheetWithImages = async (file) => {
+  const ExcelJS = await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  const ws = wb.worksheets[0];
+  if (!ws) return { rows: [], images: [] };
+
+  const rows = [];
+  ws.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    const cells = [];
+    row.eachCell({ includeEmpty: true }, (c, colNumber) => { cells[colNumber - 1] = c.text ?? ''; });
+    rows[rowNumber - 1] = cells;
+  });
+  for (let i = 0; i < rows.length; i += 1) if (!rows[i]) rows[i] = [];
+
+  const images = ws.getImages().map((im) => {
+    const media = wb.model.media.find((m) => String(m.index) === String(im.imageId));
+    if (!media?.buffer) return null;
+    return {
+      row: im.range.tl.nativeRow,
+      col: im.range.tl.nativeCol,
+      dataUrl: bytesToDataUrl(media.buffer, media.extension),
+    };
+  }).filter(Boolean);
+
+  return { rows, images };
 };
 
 // --- 🔵 工具函式：解析 CSV (處理引號與換行) ---
@@ -1365,6 +1427,9 @@ export default function App() {
   const [isPwdModalOpen, setIsPwdModalOpen] = useState(false);
   const [pwdForm, setPwdForm] = useState({ old: '', new: '', confirm: '' });
 
+  // 🟢 Excel 匯入進度（壓縮圖片很花時間，要讓使用者知道還在跑）
+  const [importProgress, setImportProgress] = useState(null); // null | { done, total }
+
   // 🟢 Google 試算表匯入 State（設定值只存 localStorage，不動 Firestore）
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
   const [sheetUrl, setSheetUrl] = useState(localStorage.getItem('labSheetCsvUrl') || DEFAULT_LAB_SHEET_CSV_URL);
@@ -1731,96 +1796,149 @@ export default function App() {
     }
   };
 
+  // 🟢 匯入 Excel：欄位依「欄名」對應（不再靠欄序），並帶入嵌入在格子裡的圖片
   const handleImportExcel = async (e) => {
     if (!guardWrite()) return;
     const file = e.target.files[0];
-    if (!file || !currentSession || isLab || !currentTable) return;
-    
-    if (!window.XLSX) {
-      showToast("Excel 模組載入中，請稍後再試", "error");
-      return;
-    }
-    const XLSX = window.XLSX;
+    if (!file || !currentSession) return;
+    if (!isLab && !currentTable) { showToast("請先建立並選擇表單", "error"); return; }
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-        try {
-            const data = new Uint8Array(event.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+    try {
+      setImportProgress({ done: 0, total: 0 });
+      const { rows, images } = await readSheetWithImages(file);
+      const { records } = parseSheet(rows, images);
+      if (!records.length) {
+        showToast("找不到可匯入的資料（請確認有「名稱」或「財產編號」欄）", "error");
+        return;
+      }
+      setImportProgress({ done: 0, total: records.length });
 
-            if (rows.length < 2) { showToast("Excel 格式錯誤或無資料", "error"); return; }
+      const nowTime = todayStr();
+      let batch = writeBatch(db);
+      let pending = 0;
+      let done = 0;
 
-            const headerRow = rows[0] || [];
-            let offset = 0;
-            if (headerRow[0] === "所屬表單") {
-                offset = 1;
-            }
-
-            const batch = writeBatch(db);
-            const nowTime = new Date().toISOString().split('T')[0];
-            let successCount = 0;
-
-            for (let i = 1; i < rows.length; i++) {
-                const row = rows[i];
-                if (row.length === 0) continue; 
-                
-                const propId = (row[0 + offset] || '').toString().trim();
-                const name = (row[1 + offset] || '').toString().trim();
-                if (!propId && !name) continue; 
-                
-                const brandModel = (row[2 + offset] || '').toString().trim();
-                const value = (row[3 + offset] || '').toString().trim();
-                const acquireDate = (row[4 + offset] || '').toString().trim();
-                const lifespan = (row[5 + offset] || '').toString().trim();
-                const user = (row[6 + offset] || '').toString().trim();
-                const location = (row[7 + offset] || '').toString().trim();
-                const note = (row[8 + offset] || '').toString().trim();
-                
-                const statusRaw = row[9 + offset] ? row[9 + offset].toString().trim() : '';
-                const status = statusRaw === '' ? '未盤點' : statusRaw;
-
-                const newRef = doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName));
-                batch.set(newRef, {
-                    sessionId: currentSession.id, 
-                    tableId: currentTable.id, 
-                    tableName: currentTable.name,
-                    propId, name, brandModel, value, acquireDate, lifespan, user, location, note, status, 
-                    addDate: nowTime, lastUpdatedStr: nowTime, imageUrl: '', 
-                    createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-                });
-                successCount++;
-            }
-            await batch.commit();
-            showToast(`成功匯入 ${successCount} 筆資料至「${currentTable.name}」`);
-        } catch (err) { 
-            console.error(err); 
-            showToast("匯入失敗，請確認檔案格式", "error"); 
-        } finally {
-            if (fileInputRef.current) fileInputRef.current.value = ''; 
+      for (const rec of records) {
+        const f = rec.fields;
+        // 嵌入圖與 data URI 一律壓縮再存；外部網址原樣保留（抓不到也不該擋住匯入）
+        let imageUrl = '';
+        if (rec.image?.startsWith('data:image')) {
+          try { imageUrl = await shrinkDataUrl(rec.image); } catch { imageUrl = ''; }
+        } else if (rec.image) {
+          imageUrl = rec.image;
         }
-    };
-    reader.readAsArrayBuffer(file);
+
+        const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', colItemsName));
+        if (isLab) {
+          const cat = categories.find((c) => c.name === (f.categoryName || '').trim());
+          batch.set(ref, {
+            sessionId: currentSession.id,
+            name: f.name || '', quantity: toQuantity(f.quantity),
+            categoryId: cat?.id || '', categoryName: cat?.name || f.categoryName || '未分類',
+            note: f.note || '', addDate: f.acquireDate || nowTime, cabinet: '',
+            borrowedCount: 0, imageUrl, lastUpdatedStr: nowTime,
+            createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+          });
+        } else {
+          batch.set(ref, {
+            sessionId: currentSession.id, tableId: currentTable.id, tableName: currentTable.name,
+            propId: f.propId || '', name: f.name || '', brandModel: f.brandModel || '',
+            value: f.value || '', acquireDate: f.acquireDate || '', lifespan: f.lifespan || '',
+            user: f.user || '', location: f.location || '', note: f.note || '',
+            status: f.status || '未盤點',
+            addDate: nowTime, lastUpdatedStr: nowTime, imageUrl,
+            createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+          });
+        }
+
+        pending += 1;
+        done += 1;
+        // 單批上限 500 筆，但帶圖片時整批的位元組才是瓶頸，壓到 50 筆一送
+        if (pending >= 50) { await batch.commit(); batch = writeBatch(db); pending = 0; }
+        setImportProgress({ done, total: records.length });
+      }
+      if (pending) await batch.commit();
+
+      const withImage = records.filter((r) => r.image).length;
+      showToast(`成功匯入 ${records.length} 筆${withImage ? `（含 ${withImage} 張圖片）` : ''}`);
+    } catch (err) {
+      console.error(err);
+      showToast(err?.message?.includes('ExcelJS') ? "Excel 模組載入失敗，請檢查網路" : "匯入失敗，請確認檔案格式", "error");
+    } finally {
+      setImportProgress(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
-  // 🟢 共用匯出：sheets = [{ name, headers, rows }]
-  const downloadSheet = (filename, sheets) => {
-    if (!window.XLSX) { showToast("Excel 模組載入中，請稍後再試", "error"); return false; }
-    const XLSX = window.XLSX;
-    const workbook = XLSX.utils.book_new();
-    const used = new Set();
-    sheets.forEach((s, idx) => {
+  // 🟢 共用匯出：sheets = [{ name, headers, rows, images? }]
+  // images = [{ row, col, dataUrl }]，row/col 為 0-based 且含表頭列；有圖片才走 ExcelJS
+  const downloadSheet = async (filename, sheets) => {
+    const sheetName = (s, idx, used) => {
       // 工作表名稱限制：不可含 []:*?/\ 且長度上限 31，且不可重複
       let name = (s.name || `工作表${idx + 1}`).replace(/[[\]:*?/\\]/g, ' ').slice(0, 31) || `工作表${idx + 1}`;
       while (used.has(name)) name = `${name.slice(0, 28)}_${idx + 1}`;
       used.add(name);
-      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([s.headers, ...s.rows]), name);
+      return name;
+    };
+
+    if (!sheets.some((s) => s.images?.length)) {
+      if (!window.XLSX) { showToast("Excel 模組載入中，請稍後再試", "error"); return false; }
+      const XLSX = window.XLSX;
+      const workbook = XLSX.utils.book_new();
+      const used = new Set();
+      sheets.forEach((s, idx) => {
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([s.headers, ...s.rows]), sheetName(s, idx, used));
+      });
+      XLSX.writeFile(workbook, filename);
+      showToast("Excel 下載已開始");
+      return true;
+    }
+
+    try {
+      showToast("正在產生含圖片的 Excel…");
+      const ExcelJS = await loadExcelJS();
+      const wb = new ExcelJS.Workbook();
+      const used = new Set();
+      sheets.forEach((s, idx) => {
+        const ws = wb.addWorksheet(sheetName(s, idx, used));
+        ws.addRow(s.headers);
+        ws.getRow(1).font = { bold: true };
+        s.rows.forEach((r) => ws.addRow(r));
+        (s.images || []).forEach(({ row, col, dataUrl }) => {
+          const ext = dataUrlExt(dataUrl);
+          if (!ext) return;
+          const id = wb.addImage({ base64: dataUrl, extension: ext === 'jpg' ? 'jpeg' : ext });
+          // 留 0.05 格邊距，圖才不會壓在格線上
+          ws.addImage(id, { tl: { col: col + 0.05, row: row + 0.05 }, ext: { width: 120, height: 90 }, editAs: 'oneCell' });
+          ws.getRow(row + 1).height = 72; // 96px ≈ 72pt，剛好容得下圖
+        });
+        if (s.images?.length) ws.getColumn(s.images[0].col + 1).width = 20;
+      });
+
+      const buf = await wb.xlsx.writeBuffer();
+      const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Excel 下載已開始");
+      return true;
+    } catch (err) {
+      console.error(err);
+      showToast("匯出失敗（含圖片）", "error");
+      return false;
+    }
+  };
+
+  // 🟢 把 imageUrl 攤成「圖片欄文字 + 嵌入圖清單」：base64 的嵌入、外部網址寫成文字
+  const buildImageColumn = (items, imageCol) => {
+    const images = [];
+    const texts = items.map((item, i) => {
+      const url = item.imageUrl || '';
+      if (url.startsWith('data:image')) { images.push({ row: i + 1, col: imageCol, dataUrl: url }); return ''; }
+      return url;
     });
-    XLSX.writeFile(workbook, filename);
-    showToast("Excel 下載已開始");
-    return true;
+    return { texts, images };
   };
 
   const handleExportExcel = async (sessionToExport = currentSession, exportSelectedOnly = false) => {
@@ -1867,9 +1985,15 @@ export default function App() {
         });
     }
 
+    // 圖片固定放最後一欄，匯出的檔案可以原樣再匯入回來
+    const imageCol = headers.length;
+    headers = [...headers, "圖片"];
+    const { texts, images } = buildImageColumn(exportItems, imageCol);
+    rows = rows.map((r, i) => [...r, texts[i]]);
+
     const tablePrefix = (!isLab && currentTable && currentSession && sessionToExport.id === currentSession.id) ? `_${currentTable.name}` : '';
     const selectionPrefix = exportSelectedOnly ? '_選取項目' : '';
-    downloadSheet(`${sessionToExport.name}${tablePrefix}${selectionPrefix}_清單.xlsx`, [{ name: '清單', headers, rows }]);
+    await downloadSheet(`${sessionToExport.name}${tablePrefix}${selectionPrefix}_清單.xlsx`, [{ name: '清單', headers, rows, images }]);
 
     if (exportSelectedOnly) {
         setIsSelectionMode(false);
@@ -1891,7 +2015,7 @@ export default function App() {
   };
 
   // 🟢 匯出成 Google 試算表同款欄位（實驗室設備），可直接貼回線上試算表
-  const handleExportSheetFormat = () => {
+  const handleExportSheetFormat = async () => {
     if (!currentSession) return;
     if (!itemsList.length) { showToast("無資料可匯出", "error"); return; }
     const rows = itemsList.map(item => {
@@ -1904,7 +2028,15 @@ export default function App() {
         loan?.phone || '', '', item.note || '',
       ];
     });
-    downloadSheet(`${currentSession.name}_試算表格式.xlsx`, [{ name: '材料設備', headers: SHEET_HEADERS, rows }]);
+    // 圖片加在原欄位之後，貼回線上試算表時前面的欄序不變
+    const imageCol = SHEET_HEADERS.length;
+    const { texts, images } = buildImageColumn(itemsList, imageCol);
+    await downloadSheet(`${currentSession.name}_試算表格式.xlsx`, [{
+      name: '材料設備',
+      headers: [...SHEET_HEADERS, '圖片'],
+      rows: rows.map((r, i) => [...r, texts[i]]),
+      images,
+    }]);
   };
 
   // 🟢 財產系統：整份清單合併匯出，每個表單一個工作表
@@ -1914,13 +2046,19 @@ export default function App() {
       const snapshot = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', colItemsName), where('sessionId', '==', currentSession.id)));
       const all = snapshot.docs.map(d => d.data());
       if (!all.length) { showToast("無資料可匯出", "error"); return; }
-      const headers = ["所屬表單", "財產編號", "財產名稱", "廠牌型別", "現值", "取得日期", "使用年限", "使用人", "存置地點", "備註", "盤點狀況"];
+      const baseHeaders = ["所屬表單", "財產編號", "財產名稱", "廠牌型別", "現值", "取得日期", "使用年限", "使用人", "存置地點", "備註", "盤點狀況"];
+      const imageCol = baseHeaders.length;
+      const headers = [...baseHeaders, "圖片"];
       const toRow = (item) => [item.tableName||'', item.propId||'', item.name||'', item.brandModel||'', item.value||'', item.acquireDate||'', item.lifespan||'', item.user||'', item.location||'', item.note||'', item.status||'未盤點'];
-      const sheets = tables.map(t => ({ name: t.name, headers, rows: all.filter(i => i.tableId === t.id).map(toRow) }));
+      const toSheet = (name, items) => {
+        const { texts, images } = buildImageColumn(items, imageCol);
+        return { name, headers, rows: items.map((it, i) => [...toRow(it), texts[i]]), images };
+      };
+      const sheets = tables.map(t => toSheet(t.name, all.filter(i => i.tableId === t.id)));
       const orphans = all.filter(i => !tables.some(t => t.id === i.tableId));
-      if (orphans.length) sheets.push({ name: '未歸屬表單', headers, rows: orphans.map(toRow) });
+      if (orphans.length) sheets.push(toSheet('未歸屬表單', orphans));
       if (!sheets.length) { showToast("無資料可匯出", "error"); return; }
-      downloadSheet(`${currentSession.name}_全部表單.xlsx`, sheets);
+      await downloadSheet(`${currentSession.name}_全部表單.xlsx`, sheets);
     } catch (err) { console.error(err); showToast("匯出失敗", "error"); }
   };
 
@@ -2724,6 +2862,28 @@ export default function App() {
       {toast && <Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)} />}
       {isSidebarOpen && <div className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm transition-opacity" onClick={() => setIsSidebarOpen(false)} />}
 
+      {/* 🟢 Excel 匯入進度：擋住畫面避免中途切換清單，圖片壓縮可能要跑一陣子 */}
+      {importProgress && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+            <div className="flex items-center gap-3 mb-4">
+              <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+              <h3 className="font-bold text-slate-800">正在匯入 Excel</h3>
+            </div>
+            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+              {importProgress.total > 0 ? (
+                <div className="h-full bg-emerald-500 transition-all duration-200" style={{ width: `${Math.round((importProgress.done / importProgress.total) * 100)}%` }} />
+              ) : (
+                <div className="h-full w-1/5 bg-emerald-500 progress-indeterminate" />
+              )}
+            </div>
+            <p className="text-sm text-slate-500 mt-3">
+              {importProgress.total > 0 ? `已處理 ${importProgress.done} / ${importProgress.total} 筆` : '正在讀取檔案與圖片…'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {fullScreenImage && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setFullScreenImage(null)}>
           <button onClick={() => setFullScreenImage(null)} className="absolute top-4 right-4 text-white hover:text-slate-300 p-2 bg-black/50 rounded-full transition-colors"><X className="w-8 h-8"/></button>
@@ -2874,7 +3034,7 @@ export default function App() {
           
           <div className="flex gap-2 flex-shrink-0 items-center">
             {/* 🟢 匯入按鈕限制所需用的 Input，確保安全保留於 DOM */}
-            {viewMode === 'items' && !isLab && currentTable && (
+            {viewMode === 'items' && canEdit && (isLab || currentTable) && (
               <input type="file" accept=".xlsx, .xls" ref={fileInputRef} className="hidden" onChange={(e) => { handleImportExcel(e); }} />
             )}
 
@@ -2924,8 +3084,8 @@ export default function App() {
                         {canEdit && isLab && (
                           <button onClick={() => { setIsActionMenuOpen(false); openSheetModal(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 從 Google 試算表匯入</button>
                         )}
-                        {canEdit && !isLab && currentTable && (
-                          <button onClick={() => { setIsActionMenuOpen(false); fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel 資料</button>
+                        {canEdit && (isLab || currentTable) && (
+                          <button onClick={() => { setIsActionMenuOpen(false); fileInputRef.current?.click(); }} className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-3 text-slate-700 font-medium transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600"/> 匯入 Excel（含圖片）</button>
                         )}
                         <div className="h-px bg-slate-100 my-1 mx-2"></div>
                       </>
