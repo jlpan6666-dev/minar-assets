@@ -26,8 +26,8 @@ const LOOKUP = Object.entries(ALIASES).reduce((acc, [key, names]) => {
   return acc;
 }, {});
 
-// 去掉空白（含全形）再比對，避免「設 備 名 稱」這種手打欄名對不上
-export const headerKey = (text) => LOOKUP[String(text ?? '').replace(/[\s　]/g, '')] || null;
+// 去掉空白再比對，避免「設 備 名 稱」這種手打欄名對不上（\s 已涵蓋全形空白 U+3000）
+export const headerKey = (text) => LOOKUP[String(text ?? '').replace(/\s/g, '')] || null;
 
 // 表頭列＝第一列能認出兩個以上欄名的（前面常有標題列、空列）
 export const findHeaderRow = (rows) => {

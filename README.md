@@ -1,16 +1,17 @@
-# React + Vite
+# MINAR 實驗室整合管理系統
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+屏科大 MINAR 實驗室的網頁版整合入口：實驗室設備管理、建良老師設備管理、龔老師財產盤點、龔老師績效、歷屆專案系統。
+使用 Google 帳號登入，依成員權限顯示可進入的系統。
 
-Currently, two official plugins are available:
+**接手維護請先讀 → [系統交接文件](docs/HANDOVER.md)**
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 快速開始
 
-## React Compiler
+```bash
+npm install
+npm run dev     # http://localhost:5173（連到正式資料庫，請小心操作）
+npm test
+npm run build
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+技術：React 19、Vite、Firebase（Auth + Firestore）、Google Apps Script，部署於 Vercel。
