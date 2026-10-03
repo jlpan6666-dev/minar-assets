@@ -404,7 +404,7 @@ npm run lint       # ESLint
 
 | 狀況 | 原因與處理 |
 |---|---|
-| 畫面變成「這個畫面發生錯誤」 | 畫面元件出錯，由 `src/ErrorBoundary.jsx` 攔下並顯示錯誤訊息（以前會整頁空白）。若提示是自動翻譯造成，請關閉該網站的翻譯；`index.html` 已宣告 `lang="zh-Hant"`、`translate="no"` 避免瀏覽器翻譯。其他錯誤請依畫面上的訊息追查 |
+| 畫面變成「這個畫面發生錯誤」 | 畫面元件出錯，由 `src/ErrorBoundary.jsx` 攔下並顯示錯誤訊息（以前會整頁空白）。若提示是自動翻譯造成，請關閉該網站的翻譯；`index.html` 已宣告 `lang="zh-TW"`、`translate="no"`、`class="notranslate"` 避免瀏覽器翻譯。其他錯誤請依畫面上的訊息追查 |
 | 登入後顯示「此帳號未獲授權」 | 該 Gmail 不在成員名單，或所有入口都是禁止存取 → 到成員管理加入／開權限 |
 | Google 登入視窗關閉後沒反應、或出現 `auth/unauthorized-domain` | 網站網域不在 Firebase 授權網域 → Firebase Console → Authentication → 設定 → 授權網域，加入正式網址 |
 | 績效頁「伺服器回應 HTTP 404」 | Apps Script 偶發錯誤，系統已自動重試 2 次；按重試通常就好。若一直發生，檢查部署是否還在、部署者帳號是否還有效 |
