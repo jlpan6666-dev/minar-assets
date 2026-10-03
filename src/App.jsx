@@ -85,6 +85,10 @@ const SYSTEM_CONFIGS = [
   { id: 'performance', name: '龔老師績效', icon: Award, standalone: true, hint: '研究計畫一覽', colorClass: 'bg-amber-600', hoverClass: 'hover:bg-amber-700', textClass: 'text-amber-600' }
 ];
 
+// 🟢 櫃位功能暫時隱藏（首頁櫃位總覽、櫃位圖頁、設備表單的櫃位欄位）
+// 設備既有的櫃位資料仍保留在資料庫；改回 true 即恢復
+const SHOW_CABINET = false;
+
 // --- 🟢 Google 授權設定 ---
 // 教師/管理者帳號與權限邏輯見 src/permissions.js
 // 成員名單（由教師於系統內管理）
@@ -3009,7 +3013,7 @@ export default function App() {
                 <>
                 {canEdit && <button onClick={() => { setViewMode('borrow-request'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'borrow-request' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><ShoppingCart className="w-5 h-5" /> 借用登記</button>}
                 <button onClick={() => { setViewMode('loans'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'loans' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><History className="w-5 h-5" /> 借還紀錄表</button>
-                <button onClick={() => { setViewMode('cabinet'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'cabinet' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><Grid3x3 className="w-5 h-5" /> 櫃位圖</button>
+                {SHOW_CABINET && <button onClick={() => { setViewMode('cabinet'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'cabinet' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><Grid3x3 className="w-5 h-5" /> 櫃位圖</button>}
                 <button onClick={() => { setViewMode('layout'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${viewMode === 'layout' ? 'bg-white/10 text-white shadow-lg font-bold border border-white/10' : 'hover:bg-white/5 text-slate-300'}`}><Map className="w-5 h-5" /> 實驗室配置圖</button>
                 </>
               )}
@@ -3187,8 +3191,8 @@ export default function App() {
           {/* Dashboard View */}
           {viewMode === 'dashboard' && (
              <div className="space-y-6 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {/* 🟢 實驗室：左邊櫃位大圖、右邊統計卡；點格子在桌機就地展開，手機則跳到櫃位圖 */}
-                {isLab ? (
+                {/* 🟢 實驗室：左邊櫃位大圖、右邊統計卡；點格子在桌機就地展開，手機則跳到櫃位圖（櫃位隱藏時與其他系統同樣四欄） */}
+                {isLab && SHOW_CABINET ? (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
                     <div className="lg:col-span-2 order-2 lg:order-1 bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
                       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -3698,7 +3702,7 @@ export default function App() {
           })()}
 
           {/* 🟢 櫃位圖 View（LAB ONLY）：左側抽屜網格 + 右側詳細資訊面板 */}
-          {isLab && viewMode === 'cabinet' && currentSession && (
+          {isLab && SHOW_CABINET && viewMode === 'cabinet' && currentSession && (
             <div className="max-w-7xl mx-auto animate-in fade-in duration-300 space-y-4">
               {/* 狀態篩選列 */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-3 flex items-center gap-2 overflow-x-auto hide-scrollbar">
@@ -4136,8 +4140,8 @@ export default function App() {
                       <div><label className="text-sm font-bold text-slate-700 mb-1 block">分類</label><select className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none bg-white text-sm" value={equipForm.categoryId} onChange={e=>setEquipForm({...equipForm, categoryId:e.target.value})} required><option value="" disabled>選擇分類</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                     </div>
                     <div><label className="text-sm font-bold text-slate-700 mb-1 block">加入日期 (非必填)</label><input type="date" className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none bg-white text-sm" value={equipForm.addDate} onChange={e=>setEquipForm({...equipForm, addDate:e.target.value})}/></div>
-                    {/* 🟢 櫃位：對應櫃位圖上的格子 */}
-                    <div>
+                    {/* 🟢 櫃位：對應櫃位圖上的格子（隱藏時既有值仍會原樣存回） */}
+                    {SHOW_CABINET && <div>
                       <label className="text-sm font-bold text-slate-700 mb-1 block">櫃位 (非必填)</label>
                       <button type="button" onClick={() => setIsSlotPickerOpen(true)} className="w-full border border-slate-200 rounded-lg p-2.5 bg-white text-sm flex items-center justify-between gap-2 hover:border-teal-500 transition-colors group">
                         {normalizeSlot(equipForm.cabinet) ? (
@@ -4153,7 +4157,7 @@ export default function App() {
                         </span>
                       </button>
                       <p className="text-xs text-slate-400 mt-1">點按開啟櫃位圖選擇位置，目前有 {freeSlotCount} 個空格</p>
-                    </div>
+                    </div>}
                     <div><label className="text-sm font-bold text-slate-700 mb-1 block">備註</label><input className="w-full border border-slate-200 rounded-lg p-2.5 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none text-sm" value={equipForm.note} onChange={e=>setEquipForm({...equipForm, note:e.target.value})}/></div>
                     </>
                 ) : (
