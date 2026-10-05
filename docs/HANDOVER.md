@@ -60,7 +60,7 @@
            匿名登入）           成員名單、圖片）     設備來源表、         （讀寫績效試算表）
                                                    電腦盤點表）
 
-  電腦資訊快速查詢_v3.bat（使用者電腦上執行） ──► Apps Script ② ──► 電腦盤點試算表
+  電腦盤點掃描工具 v4（Windows／macOS／Ubuntu） ──► Apps Script ② ──► 電腦盤點試算表
 ```
 
 - **沒有自己的後端伺服器**。資料都在 Firebase；Google 試算表相關的讀寫透過 Apps Script。
@@ -83,7 +83,7 @@
 | 5 | 電腦盤點試算表 | ID 見 §14 | 同上 |
 | 6 | 龔老師績效試算表 | ID 見 §14 | 同上（**編輯者名單同時決定誰能在系統內修改績效**，見 §5.4） |
 | 7 | Apps Script ① 績效 API | 綁在績效試算表（擴充功能 → Apps Script） | 以「執行身分：我」部署，**部署者帳號失效，績效頁就無法讀寫**。建議改由實驗室共用帳號重新部署 |
-| 8 | Apps Script ② 電腦盤點寫入 | 應綁在電腦盤點試算表（**原始碼不在 repo**） | 同上；並請把原始碼備份進 `apps-script/` |
+| 8 | Apps Script ② 電腦盤點寫入 | 綁在電腦盤點試算表（**原始碼不在 repo**，見 §8.3） | 同上；並轉交 `電腦盤點寫入API.gs` 原始碼 |
 | 9 | 系統「老師帳號」 | `src/permissions.js` 的 `OWNER_EMAILS`（目前 3 個：兩位老師＋目前維護者） | 維護者換人時，改成新維護者的 Gmail 並重新部署（見 §11.2） |
 
 ---
@@ -273,14 +273,22 @@ artifacts / lab-management-system-production / public / data / {集合}
 
 ### 8.3 Apps Script ② — 電腦盤點寫入
 
-- 由掃描工具 `.bat` 呼叫，把掃到的電腦資訊寫進電腦盤點試算表。
-- 網址寫在 `.bat` 內的 `WEB_APP_URL`（完整網址見 §14）。
-- ⚠️ **這支腳本的原始碼不在本 repo**。請到電腦盤點試算表 → 擴充功能 → Apps Script 找到它，複製一份存到 `apps-script/` 並提交。
+- 由掃描工具呼叫，把掃到的電腦資訊寫進電腦盤點試算表的「電腦盤點」工作表。
+- 網址寫在各掃描工具內的 `WEB_APP_URL`（完整網址見 §14）。
+- v4 版（2026-10-05 起）**依欄名寫入**：以「設備識別碼」更新或新增；缺少的欄名自動補在最右邊；試算表欄位可自由調整順序；「遠端桌面」「使用者名稱/密碼」等人工欄位不會被覆蓋。
+- ⚠️ **原始碼不在本 repo**（腳本內含寫入用 token，而 repo 是公開的）。目前的原始碼在維護者電腦的 `文件\GitHub\電腦盤點工具_v4\電腦盤點寫入API.gs`，交接時請一併轉交，或存放在不公開的位置。
 
 ### 8.4 電腦掃描工具
 
-- 檔案：`public/pc-scan.zip`，內含 `電腦資訊快速查詢_v3.bat`。系統「電腦盤點」頁提供下載。
-- 包成 zip 是因為瀏覽器常會攔截直接下載 `.bat`。
+- 檔案：`public/pc-scan.zip`（下載檔名 `電腦盤點工具_v4.zip`），系統「電腦盤點」頁提供下載。內含：
+  - `電腦資訊快速查詢_v4_Windows.bat`：雙擊執行。
+  - `電腦資訊快速查詢_v4_macOS.command`：終端機用 `bash` 執行。
+  - `電腦資訊快速查詢_v4_Ubuntu.sh`：終端機用 `bash` 執行，會自動要求 sudo。
+  - `使用說明.txt`
+- 收集的資料：設備識別碼（BIOS 序號，讀不到時用電腦名稱）、電腦名稱、主機名稱、內網 IP 與網卡 MAC（只列實體網卡）、公網 IP 與位置、CPU、GPU／VRAM、主機板、RAM、磁碟、作業系統。
+- macOS／Ubuntu 版可用 `DRY_RUN=1 bash 檔名` 試跑：只顯示要送出的資料，不上傳。
+- Windows 版的 PowerShell 主體以 base64 分段內嵌在 .bat 中（避免中文編碼與多行指令問題），要修改時需先解碼、改完再重新編碼。
+- macOS／Ubuntu 腳本必須維持 Unix 換行（LF），用 Windows 編輯器存成 CRLF 會無法執行。
 - **更新工具**：換掉 `public/pc-scan.zip`；若檔名版本改變，順便改 `src/pcInventory.js` 的 `SCAN_TOOL_FILENAME`（下載時顯示的檔名）。
 
 ### 8.5 CDN 相依（網路不通或 CDN 故障時會受影響）
@@ -428,7 +436,7 @@ npm run lint       # ESLint
 
 - **權限只在前端檢查**：建議把 §4 的權限規則寫進 Firestore 安全規則（依 `configs/authorized_members` 判斷各集合的讀寫），並把規則檔納入 repo 版控。
 - **Apps Script 綁在個人帳號**：①② 都以部署者身分執行，部署者離開後會失效。建議改由實驗室共用帳號擁有並部署。
-- **Apps Script ② 原始碼沒有備份**：見 §8.3。
+- **Apps Script ② 原始碼只在維護者電腦上**：見 §8.3，交接時務必轉交。
 
 ### 中
 
@@ -474,7 +482,7 @@ npm run lint       # ESLint
 - [ ] 接手人已加入 Firebase 專案
 - [ ] 接手人已是三份 Google 試算表的編輯者
 - [ ] Apps Script ①② 的擁有者／部署者已確認（必要時改由共用帳號重新部署）
-- [ ] Apps Script ② 原始碼已備份進 `apps-script/`
+- [ ] Apps Script ② 原始碼（`電腦盤點寫入API.gs`）已轉交接手人
 - [ ] `OWNER_EMAILS` 已依需要更新並部署
 - [ ] 接手人在自己電腦跑過 `npm install`、`npm run dev`、`npm test`
 - [ ] 接手人已實際登入正式網站，並在成員管理看得到自己
