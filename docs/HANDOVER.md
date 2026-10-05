@@ -280,14 +280,17 @@ artifacts / lab-management-system-production / public / data / {集合}
 
 ### 8.4 電腦掃描工具
 
-- 檔案：`public/pc-scan.zip`（下載檔名 `電腦盤點工具_v4.zip`），系統「電腦盤點」頁提供下載。內含：
-  - `電腦資訊快速查詢_v4_Windows.bat`：雙擊執行。
+- 檔案：`public/pc-scan.zip`（下載檔名 `電腦盤點工具_v4.1.zip`），系統「電腦盤點」頁提供下載。內含：
+  - `電腦資訊快速查詢_v4_Windows.bat` ＋ `pc-inventory-windows.ps1`：雙擊 bat 執行，兩個檔案要在同一個資料夾。
   - `電腦資訊快速查詢_v4_macOS.command`：終端機用 `bash` 執行。
   - `電腦資訊快速查詢_v4_Ubuntu.sh`：終端機用 `bash` 執行，會自動要求 sudo。
   - `使用說明.txt`
 - 收集的資料：設備識別碼（BIOS 序號，讀不到時用電腦名稱）、電腦名稱、主機名稱、內網 IP 與網卡 MAC（只列實體網卡）、公網 IP 與位置、CPU、GPU／VRAM、主機板、RAM、磁碟、作業系統。
 - macOS／Ubuntu 版可用 `DRY_RUN=1 bash 檔名` 試跑：只顯示要送出的資料，不上傳。
-- Windows 版的 PowerShell 主體以 base64 分段內嵌在 .bat 中（避免中文編碼與多行指令問題），要修改時需先解碼、改完再重新編碼。
+- Windows 版（v4.1 起）分工：`pc-inventory-windows.ps1` 只讀硬體資訊並產生 JSON（存在 `%TEMP%\minar-pc-inventory\`）；bat 用 Windows 內建的 `curl.exe` 上傳（連線逾時 15 秒、總時限 90 秒、自動重試 3 次），失敗才以 `-Upload` 參數改用 PowerShell 上傳（會套用 Windows 的 proxy 設定）。
+  - 不要再改回「把 PowerShell 程式碼 base64 編碼塞進 bat、執行時解碼再 `Invoke-Expression`」的寫法：v3／v4 曾這樣做，被 Symantec 以行為偵測 `AGR.Terminate!g2` 終止。
+  - `.ps1` 必須存成 **UTF-8 含 BOM**（Windows PowerShell 5.1 才能正確讀中文）；`.bat` 必須是 **UTF-8 不含 BOM**、CRLF 換行。
+  - 產生的 `payload.json` 不能有 BOM，否則 Apps Script 解析 JSON 會失敗。
 - macOS／Ubuntu 腳本必須維持 Unix 換行（LF），用 Windows 編輯器存成 CRLF 會無法執行。
 - **更新工具**：換掉 `public/pc-scan.zip`；若檔名版本改變，順便改 `src/pcInventory.js` 的 `SCAN_TOOL_FILENAME`（下載時顯示的檔名）。
 

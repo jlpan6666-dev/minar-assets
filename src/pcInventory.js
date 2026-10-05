@@ -8,7 +8,7 @@ export const PC_SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${PC_SHE
 
 // 掃描工具（放在 public/，部署後同網域可直接下載；壓縮檔可避免瀏覽器攔截 .bat）
 export const SCAN_TOOL_PATH = '/pc-scan.zip';
-export const SCAN_TOOL_FILENAME = '電腦盤點工具_v4.zip';
+export const SCAN_TOOL_FILENAME = '電腦盤點工具_v4.1.zip';
 
 // 表頭關鍵欄位，用來辨識第一列是否為表頭（欄位格式以試算表為準，不在系統端改動）
 const HEADER_HINT = '設備識別碼';
