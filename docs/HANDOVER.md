@@ -291,6 +291,7 @@ artifacts / lab-management-system-production / public / data / {集合}
   - 不要再改回「把 PowerShell 程式碼 base64 編碼塞進 bat、執行時解碼再 `Invoke-Expression`」的寫法：v3／v4 曾這樣做，被 Symantec 以行為偵測 `AGR.Terminate!g2` 終止。
   - `.ps1` 必須存成 **UTF-8 含 BOM**（Windows PowerShell 5.1 才能正確讀中文）；`.bat` 必須是 **UTF-8 不含 BOM**、CRLF 換行。
   - 產生的 `payload.json` 不能有 BOM，否則 Apps Script 解析 JSON 會失敗。
+  - **不要讓 HTTP 工具自動跟隨轉址**：Apps Script 會先回 302，轉到一次性的 `script.googleusercontent.com/macros/echo?...` 結果網址，該網址只能用 GET 讀一次。若跟隨轉址時沿用 POST，會得到雲端硬碟的「很抱歉，目前無法開啟這個檔案」（HTTP 405）。工具的做法是先 POST、讀出 `Location`，再自己用 GET 取回結果。資料在第一次 POST 時就已寫入。
 - macOS／Ubuntu 腳本必須維持 Unix 換行（LF），用 Windows 編輯器存成 CRLF 會無法執行。
 - **更新工具**：換掉 `public/pc-scan.zip`；若檔名版本改變，順便改 `src/pcInventory.js` 的 `SCAN_TOOL_FILENAME`（下載時顯示的檔名）。
 
